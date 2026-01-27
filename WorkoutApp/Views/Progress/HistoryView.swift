@@ -156,22 +156,22 @@ struct HistoryDetailView: View {
                                 Section(first.exercise.name) {
                                     ForEach(sets) { setWithExercise in
                                         HStack {
-                                            Text("Set \(setWithExercise.set.setNumber)")
+                                            Text("Set \(setWithExercise.sessionSet.setNumber)")
 
                                             Spacer()
 
                                             if first.exercise.exerciseType == .reps {
-                                                if let reps = setWithExercise.set.reps {
+                                                if let reps = setWithExercise.sessionSet.reps {
                                                     Text("\(reps) reps")
                                                 }
                                             } else {
-                                                if let duration = setWithExercise.set.duration {
+                                                if let duration = setWithExercise.sessionSet.duration {
                                                     Text(formatDuration(duration))
                                                 }
                                             }
 
-                                            if let weight = setWithExercise.set.weight {
-                                                Text("@ \(setWithExercise.set.formattedWeight)")
+                                            if let weight = setWithExercise.sessionSet.weight {
+                                                Text("@ \(setWithExercise.sessionSet.formattedWeight)")
                                                     .foregroundColor(.secondary)
                                             }
                                         }

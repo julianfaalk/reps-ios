@@ -151,27 +151,27 @@ struct SessionWithDetails: Identifiable {
     var totalSets: Int { sets.count }
 
     var totalReps: Int {
-        sets.compactMap { $0.set.reps }.reduce(0, +)
+        sets.compactMap { $0.sessionSet.reps }.reduce(0, +)
     }
 
     var exercisesCompleted: Int {
-        Set(sets.map { $0.set.exerciseId }).count
+        Set(sets.map { $0.sessionSet.exerciseId }).count
     }
 
     var totalVolume: Double {
         sets.reduce(0) { total, setDetail in
-            let reps = Double(setDetail.set.reps ?? 0)
-            let weight = setDetail.set.weight ?? 0
+            let reps = Double(setDetail.sessionSet.reps ?? 0)
+            let weight = setDetail.sessionSet.weight ?? 0
             return total + (reps * weight)
         }
     }
 }
 
 struct SessionSetWithExercise: Identifiable, Hashable {
-    var set: SessionSet
+    var sessionSet: SessionSet
     var exercise: Exercise
 
-    var id: UUID { set.id }
+    var id: UUID { sessionSet.id }
 }
 
 // Helper function

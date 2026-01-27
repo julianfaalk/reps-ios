@@ -399,7 +399,7 @@ final class DatabaseService {
             var setsWithExercises: [SessionSetWithExercise] = []
             for set in sets {
                 if let exercise = try Exercise.fetchOne(db, key: set.exerciseId) {
-                    setsWithExercises.append(SessionSetWithExercise(set: set, exercise: exercise))
+                    setsWithExercises.append(SessionSetWithExercise(sessionSet: set, exercise: exercise))
                 }
             }
 
@@ -450,7 +450,7 @@ final class DatabaseService {
                 var setsWithExercises: [SessionSetWithExercise] = []
                 for set in sets {
                     if let exercise = try Exercise.fetchOne(db, key: set.exerciseId) {
-                        setsWithExercises.append(SessionSetWithExercise(set: set, exercise: exercise))
+                        setsWithExercises.append(SessionSetWithExercise(sessionSet: set, exercise: exercise))
                     }
                 }
 
@@ -493,7 +493,7 @@ final class DatabaseService {
             var results: [SessionSetWithExercise] = []
             for set in sets {
                 if let exercise = try Exercise.fetchOne(db, key: set.exerciseId) {
-                    results.append(SessionSetWithExercise(set: set, exercise: exercise))
+                    results.append(SessionSetWithExercise(sessionSet: set, exercise: exercise))
                 }
             }
             return results
