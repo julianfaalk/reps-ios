@@ -182,6 +182,142 @@ final class DatabaseService {
             """)
         }
 
+        migrator.registerMigration("v2_seed_ppl") { db in
+            let now = Date().ISO8601Format()
+
+            // ── Push Exercises ──
+            let bankdruecken = UUID().uuidString
+            let schraegbankKH = UUID().uuidString
+            let dips = UUID().uuidString
+            let cableFlys = UUID().uuidString
+            let trizepsPushdowns = UUID().uuidString
+            let overheadTrizeps = UUID().uuidString
+
+            // ── Pull Exercises ──
+            let klimmzuege = UUID().uuidString
+            let rudernLH = UUID().uuidString
+            let seatedCableRow = UUID().uuidString
+            let facePulls = UUID().uuidString
+            let bizepsCurlsLH = UUID().uuidString
+            let hammerCurls = UUID().uuidString
+
+            // ── Leg Exercises ──
+            let kniebeugen = UUID().uuidString
+            let rumKreuzheben = UUID().uuidString
+            let beinpresse = UUID().uuidString
+            let walkingLunges = UUID().uuidString
+            let beinbeuger = UUID().uuidString
+            let wadenheben = UUID().uuidString
+
+            // ── Shoulders/Arms/Core Exercises ──
+            let schulterdrKH = UUID().uuidString
+            let seitheben = UUID().uuidString
+            let reverseFlys = UUID().uuidString
+            let barbellCurls = UUID().uuidString
+            let inclineCurls = UUID().uuidString
+            let skullcrushers = UUID().uuidString
+            let cableKickbacks = UUID().uuidString
+            let hangingLegRaises = UUID().uuidString
+            let cableCrunches = UUID().uuidString
+
+            // Insert all exercises
+            try db.execute(sql: """
+                INSERT INTO exercises (id, name, exercise_type, muscle_groups, equipment, notes, created_at, updated_at) VALUES
+                -- Push
+                ('\(bankdruecken)', 'Bankdrücken', 'reps', '["Chest","Triceps","Front Delts"]', 'Barbell', 'Flache Bank, kontrolliertes Absenken zur Brust', '\(now)', '\(now)'),
+                ('\(schraegbankKH)', 'Schrägbank Kurzhanteln', 'reps', '["Chest","Front Delts"]', 'Dumbbells', 'Schrägbank 30-45 Grad, voller Bewegungsumfang', '\(now)', '\(now)'),
+                ('\(dips)', 'Dips', 'reps', '["Chest","Triceps"]', 'Dip Station', 'Brust-fokussiert: Oberkörper nach vorne lehnen', '\(now)', '\(now)'),
+                ('\(cableFlys)', 'Cable Flys', 'reps', '["Chest"]', 'Cable Machine', 'Kabelzug, kontrollierte Bewegung, Squeeze am Ende', '\(now)', '\(now)'),
+                ('\(trizepsPushdowns)', 'Trizeps Pushdowns', 'reps', '["Triceps"]', 'Cable Machine', 'Kabelzug mit Seil oder V-Bar', '\(now)', '\(now)'),
+                ('\(overheadTrizeps)', 'Overhead Trizeps Extension', 'reps', '["Triceps"]', 'Cable Machine', 'Kabelzug oder Kurzhantel über Kopf', '\(now)', '\(now)'),
+                -- Pull
+                ('\(klimmzuege)', 'Klimmzüge / Latzug', 'reps', '["Back","Biceps"]', 'Pull-Up Bar', 'Klimmzüge oder Latzug als Alternative', '\(now)', '\(now)'),
+                ('\(rudernLH)', 'Rudern Langhantel', 'reps', '["Back","Biceps"]', 'Barbell', 'Vorgebeugtes Rudern, Rücken gerade halten', '\(now)', '\(now)'),
+                ('\(seatedCableRow)', 'Seated Cable Row', 'reps', '["Back"]', 'Cable Machine', 'Enger Griff, Schulterblätter zusammenziehen', '\(now)', '\(now)'),
+                ('\(facePulls)', 'Face Pulls', 'reps', '["Rear Delts","Upper Back"]', 'Cable Machine', 'Seil auf Gesichtshöhe ziehen, hohe Wiederholungen', '\(now)', '\(now)'),
+                ('\(bizepsCurlsLH)', 'Bizeps Curls Langhantel', 'reps', '["Biceps"]', 'Barbell', 'SZ-Stange oder gerade Stange', '\(now)', '\(now)'),
+                ('\(hammerCurls)', 'Hammer Curls', 'reps', '["Biceps","Forearms"]', 'Dumbbells', 'Neutraler Griff, Kurzhanteln', '\(now)', '\(now)'),
+                -- Legs
+                ('\(kniebeugen)', 'Kniebeugen', 'reps', '["Quads","Glutes"]', 'Barbell', 'High Bar oder Low Bar Squat, tiefe Position', '\(now)', '\(now)'),
+                ('\(rumKreuzheben)', 'Rumänisches Kreuzheben', 'reps', '["Hamstrings","Glutes","Lower Back"]', 'Barbell', 'Beine leicht gebeugt, Hüfte nach hinten', '\(now)', '\(now)'),
+                ('\(beinpresse)', 'Beinpresse', 'reps', '["Quads","Glutes"]', 'Leg Press', 'Fußposition variieren für Fokus', '\(now)', '\(now)'),
+                ('\(walkingLunges)', 'Walking Lunges', 'reps', '["Quads","Glutes"]', 'Dumbbells', 'Reps pro Bein, aufrechter Oberkörper', '\(now)', '\(now)'),
+                ('\(beinbeuger)', 'Beinbeuger Maschine', 'reps', '["Hamstrings"]', 'Machine', 'Liegend oder sitzend, kontrolliert', '\(now)', '\(now)'),
+                ('\(wadenheben)', 'Wadenheben stehend', 'reps', '["Calves"]', 'Machine', 'Voller Bewegungsumfang, Pause unten', '\(now)', '\(now)'),
+                -- Shoulders / Arms / Core
+                ('\(schulterdrKH)', 'Schulterdrücken Kurzhantel', 'reps', '["Shoulders","Triceps"]', 'Dumbbells', 'Sitzend oder stehend, Kurzhanteln', '\(now)', '\(now)'),
+                ('\(seitheben)', 'Seitheben', 'reps', '["Shoulders"]', 'Dumbbells', 'Leichtes Gewicht, kontrolliert, 12-15 Reps', '\(now)', '\(now)'),
+                ('\(reverseFlys)', 'Reverse Flys', 'reps', '["Rear Delts"]', 'Dumbbells', 'Vorgebeugt oder am Kabelzug', '\(now)', '\(now)'),
+                ('\(barbellCurls)', 'Barbell Curls', 'reps', '["Biceps"]', 'Barbell', 'SZ-Stange, strikter Form', '\(now)', '\(now)'),
+                ('\(inclineCurls)', 'Incline Dumbbell Curls', 'reps', '["Biceps"]', 'Dumbbells', 'Schrägbank 45 Grad, volle Dehnung', '\(now)', '\(now)'),
+                ('\(skullcrushers)', 'Skullcrushers', 'reps', '["Triceps"]', 'Barbell', 'SZ-Stange, Ellenbogen fixiert', '\(now)', '\(now)'),
+                ('\(cableKickbacks)', 'Cable Kickbacks', 'reps', '["Triceps"]', 'Cable Machine', 'Kabelzug, ein Arm, volle Extension', '\(now)', '\(now)'),
+                ('\(hangingLegRaises)', 'Hanging Leg Raises', 'reps', '["Abs"]', 'Pull-Up Bar', 'Beine gestreckt oder angewinkelt', '\(now)', '\(now)'),
+                ('\(cableCrunches)', 'Cable Crunches', 'reps', '["Abs"]', 'Cable Machine', 'Kabelzug, kniend, Crunches nach unten', '\(now)', '\(now)')
+            """)
+
+            // ── Templates ──
+            let pushTemplate = UUID().uuidString
+            let pullTemplate = UUID().uuidString
+            let legsTemplate = UUID().uuidString
+            let shouldersArmsTemplate = UUID().uuidString
+
+            try db.execute(sql: """
+                INSERT INTO templates (id, name, created_at, updated_at) VALUES
+                ('\(pushTemplate)', 'Push (Brust, Trizeps, vordere Schulter)', '\(now)', '\(now)'),
+                ('\(pullTemplate)', 'Pull (Rücken, Bizeps, hintere Schulter)', '\(now)', '\(now)'),
+                ('\(legsTemplate)', 'Legs (Beine, unterer Rücken)', '\(now)', '\(now)'),
+                ('\(shouldersArmsTemplate)', 'Schultern, Arme & Core', '\(now)', '\(now)')
+            """)
+
+            // ── Tag A: Push ──
+            try db.execute(sql: """
+                INSERT INTO template_exercises (id, template_id, exercise_id, sort_order, target_sets, target_reps, target_weight) VALUES
+                ('\(UUID().uuidString)', '\(pushTemplate)', '\(bankdruecken)', 0, 4, 8, NULL),
+                ('\(UUID().uuidString)', '\(pushTemplate)', '\(schraegbankKH)', 1, 3, 10, NULL),
+                ('\(UUID().uuidString)', '\(pushTemplate)', '\(dips)', 2, 3, 12, NULL),
+                ('\(UUID().uuidString)', '\(pushTemplate)', '\(cableFlys)', 3, 3, 15, NULL),
+                ('\(UUID().uuidString)', '\(pushTemplate)', '\(trizepsPushdowns)', 4, 3, 12, NULL),
+                ('\(UUID().uuidString)', '\(pushTemplate)', '\(overheadTrizeps)', 5, 3, 12, NULL)
+            """)
+
+            // ── Tag B: Pull ──
+            try db.execute(sql: """
+                INSERT INTO template_exercises (id, template_id, exercise_id, sort_order, target_sets, target_reps, target_weight) VALUES
+                ('\(UUID().uuidString)', '\(pullTemplate)', '\(klimmzuege)', 0, 4, 10, NULL),
+                ('\(UUID().uuidString)', '\(pullTemplate)', '\(rudernLH)', 1, 4, 10, NULL),
+                ('\(UUID().uuidString)', '\(pullTemplate)', '\(seatedCableRow)', 2, 3, 12, NULL),
+                ('\(UUID().uuidString)', '\(pullTemplate)', '\(facePulls)', 3, 3, 20, NULL),
+                ('\(UUID().uuidString)', '\(pullTemplate)', '\(bizepsCurlsLH)', 4, 3, 10, NULL),
+                ('\(UUID().uuidString)', '\(pullTemplate)', '\(hammerCurls)', 5, 3, 12, NULL)
+            """)
+
+            // ── Tag C: Legs ──
+            try db.execute(sql: """
+                INSERT INTO template_exercises (id, template_id, exercise_id, sort_order, target_sets, target_reps, target_weight) VALUES
+                ('\(UUID().uuidString)', '\(legsTemplate)', '\(kniebeugen)', 0, 4, 8, NULL),
+                ('\(UUID().uuidString)', '\(legsTemplate)', '\(rumKreuzheben)', 1, 3, 10, NULL),
+                ('\(UUID().uuidString)', '\(legsTemplate)', '\(beinpresse)', 2, 3, 12, NULL),
+                ('\(UUID().uuidString)', '\(legsTemplate)', '\(walkingLunges)', 3, 3, 12, NULL),
+                ('\(UUID().uuidString)', '\(legsTemplate)', '\(beinbeuger)', 4, 3, 12, NULL),
+                ('\(UUID().uuidString)', '\(legsTemplate)', '\(wadenheben)', 5, 4, 15, NULL)
+            """)
+
+            // ── Tag D: Schultern, Arme & Core ──
+            try db.execute(sql: """
+                INSERT INTO template_exercises (id, template_id, exercise_id, sort_order, target_sets, target_reps, target_weight) VALUES
+                ('\(UUID().uuidString)', '\(shouldersArmsTemplate)', '\(schulterdrKH)', 0, 4, 10, NULL),
+                ('\(UUID().uuidString)', '\(shouldersArmsTemplate)', '\(seitheben)', 1, 4, 15, NULL),
+                ('\(UUID().uuidString)', '\(shouldersArmsTemplate)', '\(reverseFlys)', 2, 3, 15, NULL),
+                ('\(UUID().uuidString)', '\(shouldersArmsTemplate)', '\(barbellCurls)', 3, 3, 10, NULL),
+                ('\(UUID().uuidString)', '\(shouldersArmsTemplate)', '\(inclineCurls)', 4, 3, 12, NULL),
+                ('\(UUID().uuidString)', '\(shouldersArmsTemplate)', '\(skullcrushers)', 5, 3, 10, NULL),
+                ('\(UUID().uuidString)', '\(shouldersArmsTemplate)', '\(cableKickbacks)', 6, 3, 12, NULL),
+                ('\(UUID().uuidString)', '\(shouldersArmsTemplate)', '\(hangingLegRaises)', 7, 3, 15, NULL),
+                ('\(UUID().uuidString)', '\(shouldersArmsTemplate)', '\(cableCrunches)', 8, 3, 20, NULL)
+            """)
+        }
+
         return migrator
     }
 
