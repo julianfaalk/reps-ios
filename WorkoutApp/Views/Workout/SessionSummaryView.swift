@@ -3,6 +3,7 @@ import SwiftUI
 struct SessionSummaryView: View {
     let session: SessionWithDetails
     let newPRs: [PersonalRecord]
+    let onSaveNotes: (String) -> Void
     let onDismiss: () -> Void
 
     @State private var notes: String = ""
@@ -127,7 +128,7 @@ struct SessionSummaryView: View {
 
                     // Done button
                     Button {
-                        // Save notes if needed
+                        onSaveNotes(notes)
                         onDismiss()
                     } label: {
                         Text("Done")

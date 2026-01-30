@@ -29,6 +29,9 @@ final class DatabaseService {
 
         dbQueue = try DatabaseQueue(path: databaseURL.path, configuration: configuration)
         try migrator.migrate(dbQueue)
+
+        // Ensure templates and schedule are seeded
+        try seedDefaultDataIfNeeded()
     }
 
     private var migrator: DatabaseMigrator {
@@ -356,6 +359,180 @@ final class DatabaseService {
         }
 
         return migrator
+    }
+
+    private func seedDefaultDataIfNeeded() throws {
+        try dbQueue.write { db in
+            // Check if templates with exercises already exist
+            let templateCount = try WorkoutTemplate.fetchCount(db)
+            let exerciseCount = try TemplateExercise.fetchCount(db)
+
+            if templateCount > 0 && exerciseCount > 0 {
+                print("✅ Templates and exercises already exist (\(templateCount) templates, \(exerciseCount) template exercises)")
+                return
+            }
+
+            // If templates exist but no exercises, delete everything and start fresh
+            if templateCount > 0 {
+                print("⚠️ Found templates without exercises, cleaning up...")
+                try db.execute(sql: "DELETE FROM schedule")
+                try db.execute(sql: "DELETE FROM template_exercises")
+                try db.execute(sql: "DELETE FROM templates")
+                try db.execute(sql: "DELETE FROM exercises")
+            }
+
+            print("🌱 Seeding default templates and exercises...")
+            let now = Date()
+
+            // ── Exercise IDs ──
+            let bankdruecken = UUID()
+            let schraegbankKH = UUID()
+            let dips = UUID()
+            let cableFlys = UUID()
+            let trizepsPushdowns = UUID()
+            let overheadTrizeps = UUID()
+
+            let klimmzuege = UUID()
+            let rudernLH = UUID()
+            let seatedCableRow = UUID()
+            let facePulls = UUID()
+            let bizepsCurlsLH = UUID()
+            let hammerCurls = UUID()
+
+            let kniebeugen = UUID()
+            let rumKreuzheben = UUID()
+            let beinpresse = UUID()
+            let walkingLunges = UUID()
+            let beinbeuger = UUID()
+            let wadenheben = UUID()
+
+            let schulterdrKH = UUID()
+            let seitheben = UUID()
+            let reverseFlys = UUID()
+            let barbellCurls = UUID()
+            let inclineCurls = UUID()
+            let skullcrushers = UUID()
+            let cableKickbacks = UUID()
+            let hangingLegRaises = UUID()
+            let cableCrunches = UUID()
+
+            // ── Create Exercises ──
+            let exercises: [Exercise] = [
+                // Push
+                Exercise(id: bankdruecken, name: "Bankdrücken", exerciseType: .reps, muscleGroups: ["Chest","Triceps","Front Delts"], equipment: "Barbell", notes: "Flache Bank, kontrolliertes Absenken zur Brust", createdAt: now, updatedAt: now),
+                Exercise(id: schraegbankKH, name: "Schrägbank Kurzhanteln", exerciseType: .reps, muscleGroups: ["Chest","Front Delts"], equipment: "Dumbbells", notes: "Schrägbank 30-45 Grad, voller Bewegungsumfang", createdAt: now, updatedAt: now),
+                Exercise(id: dips, name: "Dips", exerciseType: .reps, muscleGroups: ["Chest","Triceps"], equipment: "Dip Station", notes: "Brust-fokussiert: Oberkörper nach vorne lehnen", createdAt: now, updatedAt: now),
+                Exercise(id: cableFlys, name: "Cable Flys", exerciseType: .reps, muscleGroups: ["Chest"], equipment: "Cable Machine", notes: "Kabelzug, kontrollierte Bewegung, Squeeze am Ende", createdAt: now, updatedAt: now),
+                Exercise(id: trizepsPushdowns, name: "Trizeps Pushdowns", exerciseType: .reps, muscleGroups: ["Triceps"], equipment: "Cable Machine", notes: "Kabelzug mit Seil oder V-Bar", createdAt: now, updatedAt: now),
+                Exercise(id: overheadTrizeps, name: "Overhead Trizeps Extension", exerciseType: .reps, muscleGroups: ["Triceps"], equipment: "Cable Machine", notes: "Kabelzug oder Kurzhantel über Kopf", createdAt: now, updatedAt: now),
+                // Pull
+                Exercise(id: klimmzuege, name: "Klimmzüge / Latzug", exerciseType: .reps, muscleGroups: ["Back","Biceps"], equipment: "Pull-Up Bar", notes: "Klimmzüge oder Latzug als Alternative", createdAt: now, updatedAt: now),
+                Exercise(id: rudernLH, name: "Rudern Langhantel", exerciseType: .reps, muscleGroups: ["Back","Biceps"], equipment: "Barbell", notes: "Vorgebeugtes Rudern, Rücken gerade halten", createdAt: now, updatedAt: now),
+                Exercise(id: seatedCableRow, name: "Seated Cable Row", exerciseType: .reps, muscleGroups: ["Back"], equipment: "Cable Machine", notes: "Enger Griff, Schulterblätter zusammenziehen", createdAt: now, updatedAt: now),
+                Exercise(id: facePulls, name: "Face Pulls", exerciseType: .reps, muscleGroups: ["Rear Delts","Upper Back"], equipment: "Cable Machine", notes: "Seil auf Gesichtshöhe ziehen, hohe Wiederholungen", createdAt: now, updatedAt: now),
+                Exercise(id: bizepsCurlsLH, name: "Bizeps Curls Langhantel", exerciseType: .reps, muscleGroups: ["Biceps"], equipment: "Barbell", notes: "SZ-Stange oder gerade Stange", createdAt: now, updatedAt: now),
+                Exercise(id: hammerCurls, name: "Hammer Curls", exerciseType: .reps, muscleGroups: ["Biceps","Forearms"], equipment: "Dumbbells", notes: "Neutraler Griff, Kurzhanteln", createdAt: now, updatedAt: now),
+                // Legs
+                Exercise(id: kniebeugen, name: "Kniebeugen", exerciseType: .reps, muscleGroups: ["Quads","Glutes"], equipment: "Barbell", notes: "High Bar oder Low Bar Squat, tiefe Position", createdAt: now, updatedAt: now),
+                Exercise(id: rumKreuzheben, name: "Rumänisches Kreuzheben", exerciseType: .reps, muscleGroups: ["Hamstrings","Glutes","Lower Back"], equipment: "Barbell", notes: "Beine leicht gebeugt, Hüfte nach hinten", createdAt: now, updatedAt: now),
+                Exercise(id: beinpresse, name: "Beinpresse", exerciseType: .reps, muscleGroups: ["Quads","Glutes"], equipment: "Leg Press", notes: "Fußposition variieren für Fokus", createdAt: now, updatedAt: now),
+                Exercise(id: walkingLunges, name: "Walking Lunges", exerciseType: .reps, muscleGroups: ["Quads","Glutes"], equipment: "Dumbbells", notes: "Reps pro Bein, aufrechter Oberkörper", createdAt: now, updatedAt: now),
+                Exercise(id: beinbeuger, name: "Beinbeuger Maschine", exerciseType: .reps, muscleGroups: ["Hamstrings"], equipment: "Machine", notes: "Liegend oder sitzend, kontrolliert", createdAt: now, updatedAt: now),
+                Exercise(id: wadenheben, name: "Wadenheben stehend", exerciseType: .reps, muscleGroups: ["Calves"], equipment: "Machine", notes: "Voller Bewegungsumfang, Pause unten", createdAt: now, updatedAt: now),
+                // Shoulders/Arms/Core
+                Exercise(id: schulterdrKH, name: "Schulterdrücken Kurzhantel", exerciseType: .reps, muscleGroups: ["Shoulders","Triceps"], equipment: "Dumbbells", notes: "Sitzend oder stehend, Kurzhanteln", createdAt: now, updatedAt: now),
+                Exercise(id: seitheben, name: "Seitheben", exerciseType: .reps, muscleGroups: ["Shoulders"], equipment: "Dumbbells", notes: "Leichtes Gewicht, kontrolliert, 12-15 Reps", createdAt: now, updatedAt: now),
+                Exercise(id: reverseFlys, name: "Reverse Flys", exerciseType: .reps, muscleGroups: ["Rear Delts"], equipment: "Dumbbells", notes: "Vorgebeugt oder am Kabelzug", createdAt: now, updatedAt: now),
+                Exercise(id: barbellCurls, name: "Barbell Curls", exerciseType: .reps, muscleGroups: ["Biceps"], equipment: "Barbell", notes: "SZ-Stange, strikter Form", createdAt: now, updatedAt: now),
+                Exercise(id: inclineCurls, name: "Incline Dumbbell Curls", exerciseType: .reps, muscleGroups: ["Biceps"], equipment: "Dumbbells", notes: "Schrägbank 45 Grad, volle Dehnung", createdAt: now, updatedAt: now),
+                Exercise(id: skullcrushers, name: "Skullcrushers", exerciseType: .reps, muscleGroups: ["Triceps"], equipment: "Barbell", notes: "SZ-Stange, Ellenbogen fixiert", createdAt: now, updatedAt: now),
+                Exercise(id: cableKickbacks, name: "Cable Kickbacks", exerciseType: .reps, muscleGroups: ["Triceps"], equipment: "Cable Machine", notes: "Kabelzug, ein Arm, volle Extension", createdAt: now, updatedAt: now),
+                Exercise(id: hangingLegRaises, name: "Hanging Leg Raises", exerciseType: .reps, muscleGroups: ["Abs"], equipment: "Pull-Up Bar", notes: "Beine gestreckt oder angewinkelt", createdAt: now, updatedAt: now),
+                Exercise(id: cableCrunches, name: "Cable Crunches", exerciseType: .reps, muscleGroups: ["Abs"], equipment: "Cable Machine", notes: "Kabelzug, kniend, Crunches nach unten", createdAt: now, updatedAt: now)
+            ]
+
+            for exercise in exercises {
+                try exercise.insert(db)
+            }
+
+            // ── Create Templates ──
+            let pushTemplate = WorkoutTemplate(id: UUID(), name: "Push (Brust, Trizeps, vordere Schulter)", createdAt: now, updatedAt: now)
+            let pullTemplate = WorkoutTemplate(id: UUID(), name: "Pull (Rücken, Bizeps, hintere Schulter)", createdAt: now, updatedAt: now)
+            let legsTemplate = WorkoutTemplate(id: UUID(), name: "Legs (Beine, unterer Rücken)", createdAt: now, updatedAt: now)
+            let shouldersTemplate = WorkoutTemplate(id: UUID(), name: "Schultern, Arme & Core", createdAt: now, updatedAt: now)
+
+            try pushTemplate.insert(db)
+            try pullTemplate.insert(db)
+            try legsTemplate.insert(db)
+            try shouldersTemplate.insert(db)
+
+            // ── Template Exercises: Push ──
+            try TemplateExercise(templateId: pushTemplate.id, exerciseId: bankdruecken, sortOrder: 0, targetSets: 4, targetReps: 8).insert(db)
+            try TemplateExercise(templateId: pushTemplate.id, exerciseId: schraegbankKH, sortOrder: 1, targetSets: 3, targetReps: 10).insert(db)
+            try TemplateExercise(templateId: pushTemplate.id, exerciseId: dips, sortOrder: 2, targetSets: 3, targetReps: 12).insert(db)
+            try TemplateExercise(templateId: pushTemplate.id, exerciseId: cableFlys, sortOrder: 3, targetSets: 3, targetReps: 15).insert(db)
+            try TemplateExercise(templateId: pushTemplate.id, exerciseId: trizepsPushdowns, sortOrder: 4, targetSets: 3, targetReps: 12).insert(db)
+            try TemplateExercise(templateId: pushTemplate.id, exerciseId: overheadTrizeps, sortOrder: 5, targetSets: 3, targetReps: 12).insert(db)
+
+            // ── Template Exercises: Pull ──
+            try TemplateExercise(templateId: pullTemplate.id, exerciseId: klimmzuege, sortOrder: 0, targetSets: 4, targetReps: 10).insert(db)
+            try TemplateExercise(templateId: pullTemplate.id, exerciseId: rudernLH, sortOrder: 1, targetSets: 4, targetReps: 10).insert(db)
+            try TemplateExercise(templateId: pullTemplate.id, exerciseId: seatedCableRow, sortOrder: 2, targetSets: 3, targetReps: 12).insert(db)
+            try TemplateExercise(templateId: pullTemplate.id, exerciseId: facePulls, sortOrder: 3, targetSets: 3, targetReps: 20).insert(db)
+            try TemplateExercise(templateId: pullTemplate.id, exerciseId: bizepsCurlsLH, sortOrder: 4, targetSets: 3, targetReps: 10).insert(db)
+            try TemplateExercise(templateId: pullTemplate.id, exerciseId: hammerCurls, sortOrder: 5, targetSets: 3, targetReps: 12).insert(db)
+
+            // ── Template Exercises: Legs ──
+            try TemplateExercise(templateId: legsTemplate.id, exerciseId: kniebeugen, sortOrder: 0, targetSets: 4, targetReps: 8).insert(db)
+            try TemplateExercise(templateId: legsTemplate.id, exerciseId: rumKreuzheben, sortOrder: 1, targetSets: 3, targetReps: 10).insert(db)
+            try TemplateExercise(templateId: legsTemplate.id, exerciseId: beinpresse, sortOrder: 2, targetSets: 3, targetReps: 12).insert(db)
+            try TemplateExercise(templateId: legsTemplate.id, exerciseId: walkingLunges, sortOrder: 3, targetSets: 3, targetReps: 12).insert(db)
+            try TemplateExercise(templateId: legsTemplate.id, exerciseId: beinbeuger, sortOrder: 4, targetSets: 3, targetReps: 12).insert(db)
+            try TemplateExercise(templateId: legsTemplate.id, exerciseId: wadenheben, sortOrder: 5, targetSets: 4, targetReps: 15).insert(db)
+
+            // ── Template Exercises: Shoulders/Arms/Core ──
+            try TemplateExercise(templateId: shouldersTemplate.id, exerciseId: schulterdrKH, sortOrder: 0, targetSets: 4, targetReps: 10).insert(db)
+            try TemplateExercise(templateId: shouldersTemplate.id, exerciseId: seitheben, sortOrder: 1, targetSets: 4, targetReps: 15).insert(db)
+            try TemplateExercise(templateId: shouldersTemplate.id, exerciseId: reverseFlys, sortOrder: 2, targetSets: 3, targetReps: 15).insert(db)
+            try TemplateExercise(templateId: shouldersTemplate.id, exerciseId: barbellCurls, sortOrder: 3, targetSets: 3, targetReps: 10).insert(db)
+            try TemplateExercise(templateId: shouldersTemplate.id, exerciseId: inclineCurls, sortOrder: 4, targetSets: 3, targetReps: 12).insert(db)
+            try TemplateExercise(templateId: shouldersTemplate.id, exerciseId: skullcrushers, sortOrder: 5, targetSets: 3, targetReps: 10).insert(db)
+            try TemplateExercise(templateId: shouldersTemplate.id, exerciseId: cableKickbacks, sortOrder: 6, targetSets: 3, targetReps: 12).insert(db)
+            try TemplateExercise(templateId: shouldersTemplate.id, exerciseId: hangingLegRaises, sortOrder: 7, targetSets: 3, targetReps: 15).insert(db)
+            try TemplateExercise(templateId: shouldersTemplate.id, exerciseId: cableCrunches, sortOrder: 8, targetSets: 3, targetReps: 20).insert(db)
+
+            // ── Create Default Schedule ──
+            try Schedule(dayOfWeek: 0, templateId: nil, isRestDay: true).insert(db)  // Sunday
+            try Schedule(dayOfWeek: 1, templateId: pushTemplate.id, isRestDay: false).insert(db)  // Monday
+            try Schedule(dayOfWeek: 2, templateId: pullTemplate.id, isRestDay: false).insert(db)  // Tuesday
+            try Schedule(dayOfWeek: 3, templateId: legsTemplate.id, isRestDay: false).insert(db)  // Wednesday
+            try Schedule(dayOfWeek: 4, templateId: nil, isRestDay: true).insert(db)  // Thursday
+            try Schedule(dayOfWeek: 5, templateId: shouldersTemplate.id, isRestDay: false).insert(db)  // Friday
+            try Schedule(dayOfWeek: 6, templateId: nil, isRestDay: true).insert(db)  // Saturday
+
+            print("✅ Seeded 27 exercises, 4 templates, and weekly schedule")
+        }
+    }
+
+    func resetAndReseedDatabase() throws {
+        try dbQueue.write { db in
+            print("🗑️ Deleting all data...")
+
+            // Delete in order respecting foreign key constraints
+            try? db.execute(sql: "DELETE FROM session_sets")
+            try? db.execute(sql: "DELETE FROM workout_sessions")
+            try? db.execute(sql: "DELETE FROM schedule")
+            try? db.execute(sql: "DELETE FROM template_exercises")
+            try? db.execute(sql: "DELETE FROM templates")
+            try? db.execute(sql: "DELETE FROM exercises")
+            try? db.execute(sql: "DELETE FROM measurements")
+            try? db.execute(sql: "DELETE FROM body_photos")
+
+            print("✅ All data deleted")
+        }
+
+        // Reseed
+        try seedDefaultDataIfNeeded()
     }
 
     // MARK: - Generic Operations

@@ -111,7 +111,7 @@ struct LiveWorkoutView: View {
                 }
             }
             .sheet(isPresented: $showingAddCardio) {
-                AddCardioView { cardio in
+                AddCardioView(sessionId: viewModel.currentSession?.id ?? UUID()) { cardio in
                     Task {
                         await viewModel.addCardioSession(cardio)
                     }
@@ -119,9 +119,18 @@ struct LiveWorkoutView: View {
             }
             .sheet(isPresented: $showingSessionSummary) {
                 if let session = completedSession {
-                    SessionSummaryView(session: session, newPRs: viewModel.newPRs) {
-                        dismiss()
-                    }
+                    SessionSummaryView(
+                        session: session,
+                        newPRs: viewModel.newPRs,
+                        onSaveNotes: { notes in
+                            Task {
+                                await viewModel.updateSessionNotes(session.session.id, notes)
+                            }
+                        },
+                        onDismiss: {
+                            dismiss()
+                        }
+                    )
                 }
             }
             .alert("Finish Workout?", isPresented: $showingFinishConfirmation) {
@@ -237,7 +246,15 @@ struct CurrentExerciseView: View {
 
     private var equipmentIsBarbell: Bool {
         let eq = (exercise.equipment ?? "").lowercased()
-        return eq.contains("barbell") || eq.contains("langhantel") || eq.contains("sz")
+        // Check for various barbell terms in multiple languages
+        let barbellTerms = [
+            "barbell", "langhantel", "sz",  // German & English common terms
+            "bar", "stange",                 // Short forms
+            "ez bar", "curl bar",            // Specific barbell types
+            "olympia", "olympic",            // Olympic barbells
+            "straight bar", "gerade"         // Straight bar variations
+        ]
+        return barbellTerms.contains { eq.contains($0) }
     }
 
     var body: some View {

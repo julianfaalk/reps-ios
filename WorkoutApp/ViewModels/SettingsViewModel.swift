@@ -128,6 +128,19 @@ class SettingsViewModel: ObservableObject {
         center.removePendingNotificationRequests(withIdentifiers: (0..<7).map { "workout_reminder_\($0)" })
     }
 
+    // MARK: - Database
+
+    func resetDatabase() async {
+        isLoading = true
+        do {
+            try db.resetAndReseedDatabase()
+            exportMessage = "Database reset successfully"
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        isLoading = false
+    }
+
     // MARK: - Export
 
     func exportJSON() -> URL? {

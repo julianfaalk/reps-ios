@@ -236,6 +236,17 @@ class WorkoutViewModel: ObservableObject {
         }
     }
 
+    func updateSessionNotes(_ sessionId: UUID, _ notes: String) async {
+        do {
+            if var session = try db.fetchSession(id: sessionId) {
+                session.notes = notes.isEmpty ? nil : notes
+                try db.saveSession(session)
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     // MARK: - Timers
 
     private func startWorkoutTimer() {

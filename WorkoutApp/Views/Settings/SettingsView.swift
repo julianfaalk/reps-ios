@@ -5,6 +5,8 @@ struct SettingsView: View {
     @State private var showingExportOptions = false
     @State private var showingShareSheet = false
     @State private var exportURLs: [URL] = []
+    @State private var showingResetAlert = false
+    @State private var showingSuccessAlert = false
 
     var body: some View {
         NavigationStack {
@@ -102,6 +104,12 @@ struct SettingsView: View {
                     } label: {
                         Label("Export Data", systemImage: "square.and.arrow.up")
                     }
+
+                    Button(role: .destructive) {
+                        showingResetAlert = true
+                    } label: {
+                        Label("Reset Database", systemImage: "trash")
+                    }
                 }
 
                 Section("About") {
@@ -132,6 +140,9 @@ struct SettingsView: View {
                     if let url = viewModel.exportJSON() {
                         exportURLs = [url]
                         showingShareSheet = true
+                        showingSuccessAlert = true
+                    } else {
+                        // Error is already shown via errorMessage alert
                     }
                 }
 
@@ -140,6 +151,9 @@ struct SettingsView: View {
                     if !urls.isEmpty {
                         exportURLs = urls
                         showingShareSheet = true
+                        showingSuccessAlert = true
+                    } else {
+                        // Error is already shown via errorMessage alert
                     }
                 }
 
@@ -157,6 +171,22 @@ struct SettingsView: View {
                 }
             } message: {
                 Text(viewModel.errorMessage ?? "")
+            }
+            .alert("Reset Database?", isPresented: $showingResetAlert) {
+                Button("Cancel", role: .cancel) { }
+                Button("Reset", role: .destructive) {
+                    Task {
+                        await viewModel.resetDatabase()
+                        showingSuccessAlert = true
+                    }
+                }
+            } message: {
+                Text("This will delete all data and restore default templates and schedule. This cannot be undone.")
+            }
+            .alert("Success", isPresented: $showingSuccessAlert) {
+                Button("OK") { }
+            } message: {
+                Text(viewModel.exportMessage ?? "Operation completed successfully")
             }
         }
     }

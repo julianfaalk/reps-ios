@@ -16,7 +16,7 @@ struct AddCardioView: View {
     @State private var resistance: String = ""
     @State private var notes: String = ""
 
-    init(sessionId: UUID = UUID(), onSave: @escaping (CardioSession) -> Void) {
+    init(sessionId: UUID, onSave: @escaping (CardioSession) -> Void) {
         self.sessionId = sessionId
         self.onSave = onSave
     }
@@ -166,5 +166,5 @@ struct AddCardioView: View {
 }
 
 #Preview {
-    AddCardioView { _ in }
+    AddCardioView(sessionId: UUID()) { _ in }
 }
