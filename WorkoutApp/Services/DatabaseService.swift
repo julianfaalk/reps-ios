@@ -318,6 +318,43 @@ final class DatabaseService {
             """)
         }
 
+        migrator.registerMigration("v3_seed_schedule") { db in
+            // Get the existing templates by name
+            let pushTemplate = try WorkoutTemplate
+                .filter(WorkoutTemplate.Columns.name == "Push (Brust, Trizeps, vordere Schulter)")
+                .fetchOne(db)
+
+            let pullTemplate = try WorkoutTemplate
+                .filter(WorkoutTemplate.Columns.name == "Pull (Rücken, Bizeps, hintere Schulter)")
+                .fetchOne(db)
+
+            let legsTemplate = try WorkoutTemplate
+                .filter(WorkoutTemplate.Columns.name == "Legs (Beine, unterer Rücken)")
+                .fetchOne(db)
+
+            let shouldersArmsTemplate = try WorkoutTemplate
+                .filter(WorkoutTemplate.Columns.name == "Schultern, Arme & Core")
+                .fetchOne(db)
+
+            // Delete any existing schedule entries
+            try db.execute(sql: "DELETE FROM schedule")
+
+            // Insert the weekly schedule
+            // 0 = Sunday, 1 = Monday, 2 = Tuesday, 3 = Wednesday, 4 = Thursday, 5 = Friday, 6 = Saturday
+            if let push = pushTemplate, let pull = pullTemplate, let legs = legsTemplate, let shoulders = shouldersArmsTemplate {
+                try db.execute(sql: """
+                    INSERT INTO schedule (id, day_of_week, template_id, is_rest_day) VALUES
+                    ('\(UUID().uuidString)', 0, NULL, 1),                        -- Sonntag: Rest Day
+                    ('\(UUID().uuidString)', 1, '\(push.id.uuidString)', 0),     -- Montag: Push
+                    ('\(UUID().uuidString)', 2, '\(pull.id.uuidString)', 0),     -- Dienstag: Pull
+                    ('\(UUID().uuidString)', 3, '\(legs.id.uuidString)', 0),     -- Mittwoch: Legs
+                    ('\(UUID().uuidString)', 4, NULL, 1),                        -- Donnerstag: Rest Day
+                    ('\(UUID().uuidString)', 5, '\(shoulders.id.uuidString)', 0),-- Freitag: Shoulders, Arms & Core
+                    ('\(UUID().uuidString)', 6, NULL, 1)                         -- Samstag: Rest Day
+                """)
+            }
+        }
+
         return migrator
     }
 

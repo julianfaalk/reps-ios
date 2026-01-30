@@ -11,7 +11,15 @@ struct TemplateDetailView: View {
 
     var body: some View {
         Group {
-            if let templateWithExercises = viewModel.currentTemplate {
+            if viewModel.isLoading {
+                ProgressView("Loading template...")
+            } else if let errorMessage = viewModel.errorMessage {
+                ContentUnavailableView(
+                    "Error Loading Template",
+                    systemImage: "exclamationmark.triangle",
+                    description: Text(errorMessage)
+                )
+            } else if let templateWithExercises = viewModel.currentTemplate {
                 List {
                     Section("Exercises") {
                         if templateWithExercises.exercises.isEmpty {
@@ -65,7 +73,11 @@ struct TemplateDetailView: View {
                     EditButton()
                 }
             } else {
-                ProgressView()
+                ContentUnavailableView(
+                    "Template Not Found",
+                    systemImage: "doc.text.slash",
+                    description: Text("This template could not be loaded")
+                )
             }
         }
         .onAppear {
