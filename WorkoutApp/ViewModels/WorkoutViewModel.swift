@@ -13,6 +13,7 @@ class WorkoutViewModel: ObservableObject {
 
     @Published var workoutDuration: Int = 0
     @Published var restTimeRemaining: Int = 0
+    @Published var restTimerTotalTime: Int = 0
     @Published var isRestTimerActive: Bool = false
     @Published var isWorkoutActive: Bool = false
 
@@ -21,11 +22,19 @@ class WorkoutViewModel: ObservableObject {
 
     @Published var errorMessage: String?
 
+    // Track last entered values per exercise during this session
+    private var lastEnteredValues: [UUID: (reps: Int?, weight: Double?)] = [:]
+
     private let db = DatabaseService.shared
     private var workoutTimer: Timer?
     private var restTimer: Timer?
     private var defaultRestTime: Int = 90
     private var currentActivity: Activity<WorkoutActivityAttributes>?
+
+    // Timestamps for background persistence
+    private var workoutStartTime: Date?
+    private var workoutPausedDuration: Int = 0
+    private var restTimerEndTime: Date?
 
     var currentExercise: TemplateExerciseDetail? {
         guard currentExerciseIndex < templateExercises.count else { return nil }
@@ -43,6 +52,7 @@ class WorkoutViewModel: ObservableObject {
 
     init() {
         loadSettings()
+        setupBackgroundObservers()
     }
 
     private func loadSettings() {
@@ -52,6 +62,59 @@ class WorkoutViewModel: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    private func setupBackgroundObservers() {
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.willResignActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.handleAppWillResignActive()
+        }
+
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.handleAppDidBecomeActive()
+        }
+    }
+
+    private func handleAppWillResignActive() {
+        // Store current state for when we come back
+        // Timers will be recalculated from timestamps when we return
+    }
+
+    private func handleAppDidBecomeActive() {
+        // Recalculate workout duration from start time
+        if isWorkoutActive, let startTime = workoutStartTime {
+            let elapsed = Int(Date().timeIntervalSince(startTime))
+            workoutDuration = elapsed + workoutPausedDuration
+        }
+
+        // Recalculate rest timer from end time
+        if isRestTimerActive, let endTime = restTimerEndTime {
+            let remaining = Int(endTime.timeIntervalSince(Date()))
+            if remaining > 0 {
+                restTimeRemaining = remaining
+            } else {
+                // Timer finished while in background
+                stopRestTimer()
+                triggerRestTimerEnd()
+            }
+        }
+    }
+
+    // MARK: - Last Entered Values
+
+    func getLastEnteredValues(for exerciseId: UUID) -> (reps: Int?, weight: Double?) {
+        return lastEnteredValues[exerciseId] ?? (nil, nil)
+    }
+
+    func setLastEnteredValues(for exerciseId: UUID, reps: Int?, weight: Double?) {
+        lastEnteredValues[exerciseId] = (reps, weight)
     }
 
     // MARK: - Session Management
@@ -75,8 +138,11 @@ class WorkoutViewModel: ObservableObject {
             completedSets = []
             cardioSessions = []
             workoutDuration = 0
+            workoutPausedDuration = 0
+            workoutStartTime = Date()
             sessionNotes = ""
             newPRs = []
+            lastEnteredValues = [:]
             isWorkoutActive = true
 
             startWorkoutTimer()
@@ -253,7 +319,10 @@ class WorkoutViewModel: ObservableObject {
         workoutTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self = self else { return }
-                self.workoutDuration += 1
+                // Calculate from start time for accuracy (handles background)
+                if let startTime = self.workoutStartTime {
+                    self.workoutDuration = Int(Date().timeIntervalSince(startTime)) + self.workoutPausedDuration
+                }
                 // Update live activity every 5 seconds to save resources
                 if self.workoutDuration % 5 == 0 && !self.isRestTimerActive {
                     self.updateLiveActivity()
@@ -269,19 +338,26 @@ class WorkoutViewModel: ObservableObject {
 
     func startRestTimer(duration: Int? = nil) {
         stopRestTimer()
-        restTimeRemaining = duration ?? defaultRestTime
+        let totalTime = duration ?? defaultRestTime
+        restTimeRemaining = totalTime
+        restTimerTotalTime = totalTime
+        restTimerEndTime = Date().addingTimeInterval(Double(totalTime))
         isRestTimerActive = true
         updateLiveActivity()
 
         restTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self = self else { return }
-                if self.restTimeRemaining > 0 {
-                    self.restTimeRemaining -= 1
-                    self.updateLiveActivity()
-                } else {
-                    self.stopRestTimer()
-                    self.triggerRestTimerEnd()
+                // Calculate from end time for accuracy
+                if let endTime = self.restTimerEndTime {
+                    let remaining = Int(ceil(endTime.timeIntervalSince(Date())))
+                    if remaining > 0 {
+                        self.restTimeRemaining = remaining
+                        self.updateLiveActivity()
+                    } else {
+                        self.stopRestTimer()
+                        self.triggerRestTimerEnd()
+                    }
                 }
             }
         }
@@ -292,12 +368,24 @@ class WorkoutViewModel: ObservableObject {
         restTimer = nil
         isRestTimerActive = false
         restTimeRemaining = 0
+        restTimerTotalTime = 0
+        restTimerEndTime = nil
         updateLiveActivity()
     }
 
     func addRestTime(_ seconds: Int) {
         if isRestTimerActive {
             restTimeRemaining += seconds
+            // Don't let it go below 1 second
+            if restTimeRemaining < 1 {
+                restTimeRemaining = 1
+            }
+            // Update total time if we're adding time (for progress calculation)
+            if seconds > 0 {
+                restTimerTotalTime += seconds
+            }
+            // Update end time
+            restTimerEndTime = Date().addingTimeInterval(Double(restTimeRemaining))
             updateLiveActivity()
         }
     }

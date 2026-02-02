@@ -110,129 +110,214 @@ struct HistoryDetailView: View {
     @State private var showingDeleteAlert = false
     @State private var editingNotes = false
     @State private var notes: String = ""
+    @State private var showingExerciseDetails = false
 
     var body: some View {
         NavigationStack {
             Group {
                 if let session = session {
-                    List {
-                        // Summary section
-                        Section("Summary") {
-                            HStack {
-                                Text("Duration")
-                                Spacer()
-                                Text(session.session.formattedDuration)
+                    ScrollView {
+                        VStack(spacing: 24) {
+                            // Header with date
+                            VStack(spacing: 8) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.system(size: 50))
+                                    .foregroundColor(.green)
+
+                                if let templateName = session.template?.name {
+                                    Text(templateName)
+                                        .font(.title2)
+                                        .fontWeight(.bold)
+                                }
+
+                                Text(session.session.startedAt, style: .date)
+                                    .font(.subheadline)
                                     .foregroundColor(.secondary)
                             }
+                            .padding(.top)
 
-                            HStack {
-                                Text("Exercises")
-                                Spacer()
-                                Text("\(session.exercisesCompleted)")
-                                    .foregroundColor(.secondary)
+                            // Stats grid (same as SessionSummaryView)
+                            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 16) {
+                                HistoryStatCard(title: "Duration", value: session.session.formattedDuration, icon: "timer")
+                                HistoryStatCard(title: "Exercises", value: "\(session.exercisesCompleted)", icon: "figure.strengthtraining.traditional")
+                                HistoryStatCard(title: "Total Sets", value: "\(session.totalSets)", icon: "square.stack.3d.up")
+                                HistoryStatCard(title: "Total Reps", value: "\(session.totalReps)", icon: "repeat")
                             }
+                            .padding(.horizontal)
 
-                            HStack {
-                                Text("Total Sets")
-                                Spacer()
-                                Text("\(session.totalSets)")
-                                    .foregroundColor(.secondary)
-                            }
-
+                            // Volume
                             if session.totalVolume > 0 {
                                 HStack {
+                                    Image(systemName: "scalemass")
+                                        .foregroundColor(.accentColor)
                                     Text("Total Volume")
+                                        .foregroundColor(.secondary)
                                     Spacer()
                                     Text(String(format: "%.0f kg", session.totalVolume))
-                                        .foregroundColor(.secondary)
+                                        .font(.headline)
                                 }
+                                .padding()
+                                .background(Color(.systemGray6))
+                                .cornerRadius(12)
+                                .padding(.horizontal)
                             }
-                        }
 
-                        // Sets by exercise
-                        let groupedSets = Dictionary(grouping: session.sets, by: { $0.exercise.id })
-                        ForEach(Array(groupedSets.keys), id: \.self) { exerciseId in
-                            if let sets = groupedSets[exerciseId], let first = sets.first {
-                                Section(first.exercise.name) {
-                                    ForEach(sets) { setWithExercise in
+                            // Cardio sessions
+                            if !session.cardioSessions.isEmpty {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    Text("Cardio")
+                                        .font(.headline)
+                                        .padding(.horizontal)
+
+                                    ForEach(session.cardioSessions) { cardio in
                                         HStack {
-                                            Text("Set \(setWithExercise.sessionSet.setNumber)")
-
+                                            Image(systemName: cardio.cardioType.icon)
+                                            Text(cardio.cardioType.displayName)
                                             Spacer()
-
-                                            if first.exercise.exerciseType == .reps {
-                                                if let reps = setWithExercise.sessionSet.reps {
-                                                    Text("\(reps) reps")
-                                                }
-                                            } else {
-                                                if let duration = setWithExercise.sessionSet.duration {
-                                                    Text(formatDuration(duration))
-                                                }
-                                            }
-
-                                            if let weight = setWithExercise.sessionSet.weight {
-                                                Text("@ \(setWithExercise.sessionSet.formattedWeight)")
+                                            Text(cardio.formattedDuration)
+                                            if let distance = cardio.formattedDistance {
+                                                Text(distance)
                                                     .foregroundColor(.secondary)
                                             }
                                         }
+                                        .padding()
+                                        .background(Color(.systemGray6))
+                                        .cornerRadius(8)
+                                        .padding(.horizontal)
                                     }
                                 }
                             }
-                        }
 
-                        // Cardio
-                        if !session.cardioSessions.isEmpty {
-                            Section("Cardio") {
-                                ForEach(session.cardioSessions) { cardio in
+                            // Exercise details (collapsible)
+                            VStack(alignment: .leading, spacing: 12) {
+                                Button {
+                                    withAnimation {
+                                        showingExerciseDetails.toggle()
+                                    }
+                                } label: {
                                     HStack {
-                                        Image(systemName: cardio.cardioType.icon)
-                                        Text(cardio.cardioType.displayName)
+                                        Text("Exercise Details")
+                                            .font(.headline)
+                                            .foregroundColor(.primary)
                                         Spacer()
-                                        Text(cardio.formattedDuration)
-                                        if let distance = cardio.formattedDistance {
-                                            Text(distance)
-                                                .foregroundColor(.secondary)
+                                        Image(systemName: showingExerciseDetails ? "chevron.up" : "chevron.down")
+                                            .foregroundColor(.secondary)
+                                    }
+                                    .padding(.horizontal)
+                                }
+
+                                if showingExerciseDetails {
+                                    let groupedSets = Dictionary(grouping: session.sets, by: { $0.exercise.id })
+                                    ForEach(Array(groupedSets.keys), id: \.self) { exerciseId in
+                                        if let sets = groupedSets[exerciseId], let first = sets.first {
+                                            VStack(alignment: .leading, spacing: 8) {
+                                                Text(first.exercise.name)
+                                                    .font(.subheadline)
+                                                    .fontWeight(.semibold)
+
+                                                ForEach(sets) { setWithExercise in
+                                                    HStack {
+                                                        Text("Set \(setWithExercise.sessionSet.setNumber)")
+                                                            .font(.caption)
+                                                            .foregroundColor(.secondary)
+                                                            .frame(width: 50, alignment: .leading)
+
+                                                        Spacer()
+
+                                                        if first.exercise.exerciseType == .reps {
+                                                            if let reps = setWithExercise.sessionSet.reps {
+                                                                Text("\(reps) reps")
+                                                                    .font(.subheadline)
+                                                            }
+                                                        } else {
+                                                            if let duration = setWithExercise.sessionSet.duration {
+                                                                Text(formatDuration(duration))
+                                                                    .font(.subheadline)
+                                                            }
+                                                        }
+
+                                                        if setWithExercise.sessionSet.weight != nil {
+                                                            Text("@ \(setWithExercise.sessionSet.formattedWeight)")
+                                                                .font(.subheadline)
+                                                                .foregroundColor(.secondary)
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            .padding()
+                                            .background(Color(.systemGray6))
+                                            .cornerRadius(8)
+                                            .padding(.horizontal)
                                         }
                                     }
                                 }
                             }
-                        }
 
-                        // Notes
-                        Section("Notes") {
-                            if editingNotes {
-                                TextEditor(text: $notes)
-                                    .frame(minHeight: 60)
-                                Button("Save Notes") {
-                                    saveNotes()
-                                }
-                            } else {
-                                if let sessionNotes = session.session.notes, !sessionNotes.isEmpty {
-                                    Text(sessionNotes)
+                            // Notes section
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Notes")
+                                    .font(.headline)
+                                    .padding(.horizontal)
+
+                                if editingNotes {
+                                    TextEditor(text: $notes)
+                                        .frame(minHeight: 80)
+                                        .padding(8)
+                                        .background(Color(.systemGray6))
+                                        .cornerRadius(8)
+                                        .padding(.horizontal)
+
+                                    Button("Save Notes") {
+                                        saveNotes()
+                                    }
+                                    .padding(.horizontal)
                                 } else {
-                                    Text("No notes")
-                                        .foregroundColor(.secondary)
-                                        .italic()
-                                }
-                                Button("Edit Notes") {
-                                    notes = session.session.notes ?? ""
-                                    editingNotes = true
-                                }
-                            }
-                        }
+                                    VStack(alignment: .leading) {
+                                        if let sessionNotes = session.session.notes, !sessionNotes.isEmpty {
+                                            Text(sessionNotes)
+                                        } else {
+                                            Text("No notes")
+                                                .foregroundColor(.secondary)
+                                                .italic()
+                                        }
 
-                        // Actions
-                        Section {
-                            Button("Delete Session", role: .destructive) {
-                                showingDeleteAlert = true
+                                        Button("Edit Notes") {
+                                            notes = session.session.notes ?? ""
+                                            editingNotes = true
+                                        }
+                                        .font(.subheadline)
+                                        .padding(.top, 4)
+                                    }
+                                    .padding()
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(Color(.systemGray6))
+                                    .cornerRadius(8)
+                                    .padding(.horizontal)
+                                }
                             }
+
+                            // Delete button
+                            Button(role: .destructive) {
+                                showingDeleteAlert = true
+                            } label: {
+                                HStack {
+                                    Image(systemName: "trash")
+                                    Text("Delete Workout")
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding()
+                                .background(Color(.systemGray6))
+                                .cornerRadius(12)
+                            }
+                            .padding(.horizontal)
+                            .padding(.bottom)
                         }
                     }
                 } else {
                     ProgressView()
                 }
             }
-            .navigationTitle(session?.template?.name ?? "Workout")
+            .navigationTitle("Workout Summary")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -272,6 +357,32 @@ struct HistoryDetailView: View {
                 editingNotes = false
             }
         }
+    }
+}
+
+struct HistoryStatCard: View {
+    let title: String
+    let value: String
+    let icon: String
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.title2)
+                .foregroundColor(.accentColor)
+
+            Text(value)
+                .font(.title2)
+                .fontWeight(.bold)
+
+            Text(title)
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding()
+        .background(Color(.systemGray6))
+        .cornerRadius(12)
     }
 }
 

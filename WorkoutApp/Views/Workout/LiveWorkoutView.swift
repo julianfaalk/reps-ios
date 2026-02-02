@@ -25,9 +25,10 @@ struct LiveWorkoutView: View {
                 if viewModel.isRestTimerActive {
                     RestTimerView(
                         timeRemaining: viewModel.restTimeRemaining,
+                        totalTime: viewModel.restTimerTotalTime,
                         formattedTime: viewModel.formattedRestTime,
                         onDismiss: { viewModel.stopRestTimer() },
-                        onAddTime: { viewModel.addRestTime(30) }
+                        onAddTime: { seconds in viewModel.addRestTime(seconds) }
                     )
                     .transition(.move(edge: .top).combined(with: .opacity))
                 }
@@ -37,7 +38,14 @@ struct LiveWorkoutView: View {
                     CurrentExerciseView(
                         detail: currentExercise,
                         completedSets: viewModel.completedSetsForCurrentExercise,
+                        lastEnteredValues: viewModel.getLastEnteredValues(for: currentExercise.exercise.id),
                         onLogSet: { reps, duration, weight in
+                            // Save last entered values for this exercise
+                            viewModel.setLastEnteredValues(
+                                for: currentExercise.exercise.id,
+                                reps: reps,
+                                weight: weight
+                            )
                             Task {
                                 await viewModel.logSet(reps: reps, duration: duration, weight: weight)
                             }
@@ -192,37 +200,97 @@ struct WorkoutTimerBar: View {
 
 struct RestTimerView: View {
     let timeRemaining: Int
+    let totalTime: Int
     let formattedTime: String
     let onDismiss: () -> Void
-    let onAddTime: () -> Void
+    let onAddTime: (Int) -> Void
+
+    private var progress: Double {
+        guard totalTime > 0 else { return 0 }
+        return Double(timeRemaining) / Double(totalTime)
+    }
+
+    private var progressColor: Color {
+        if progress > 0.5 {
+            return .green
+        } else if progress > 0.25 {
+            return .orange
+        } else {
+            return .red
+        }
+    }
 
     var body: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 20) {
             Text("Rest")
                 .font(.headline)
                 .foregroundColor(.secondary)
 
-            Text(formattedTime)
-                .font(.system(size: 64, weight: .bold, design: .rounded))
-                .monospacedDigit()
+            // Circular progress timer
+            ZStack {
+                // Background circle
+                Circle()
+                    .stroke(Color(.systemGray4), lineWidth: 12)
+                    .frame(width: 180, height: 180)
 
-            HStack(spacing: 20) {
-                Button(action: onAddTime) {
-                    Label("+30s", systemImage: "plus")
-                        .padding(.horizontal, 20)
+                // Progress circle
+                Circle()
+                    .trim(from: 0, to: progress)
+                    .stroke(progressColor, style: StrokeStyle(lineWidth: 12, lineCap: .round))
+                    .frame(width: 180, height: 180)
+                    .rotationEffect(.degrees(-90))
+                    .animation(.linear(duration: 0.5), value: progress)
+
+                // Time display
+                Text(formattedTime)
+                    .font(.system(size: 48, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+            }
+
+            // +/- buttons row
+            HStack(spacing: 12) {
+                Button {
+                    onAddTime(-10)
+                } label: {
+                    Text("-10s")
+                        .font(.headline)
+                        .padding(.horizontal, 16)
                         .padding(.vertical, 10)
                         .background(Color(.systemGray5))
                         .cornerRadius(10)
                 }
 
-                Button(action: onDismiss) {
-                    Label("Skip", systemImage: "forward.fill")
-                        .padding(.horizontal, 20)
+                Button {
+                    onAddTime(10)
+                } label: {
+                    Text("+10s")
+                        .font(.headline)
+                        .padding(.horizontal, 16)
                         .padding(.vertical, 10)
-                        .background(Color.accentColor)
-                        .foregroundColor(.white)
+                        .background(Color(.systemGray5))
                         .cornerRadius(10)
                 }
+
+                Button {
+                    onAddTime(30)
+                } label: {
+                    Text("+30s")
+                        .font(.headline)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .background(Color(.systemGray5))
+                        .cornerRadius(10)
+                }
+            }
+
+            Button(action: onDismiss) {
+                Label("Skip Rest", systemImage: "forward.fill")
+                    .font(.headline)
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 12)
+                    .background(Color.accentColor)
+                    .foregroundColor(.white)
+                    .cornerRadius(12)
             }
         }
         .padding()
@@ -234,12 +302,14 @@ struct RestTimerView: View {
 struct CurrentExerciseView: View {
     let detail: TemplateExerciseDetail
     let completedSets: [SessionSet]
+    let lastEnteredValues: (reps: Int?, weight: Double?)
     let onLogSet: (Int?, Int?, Double?) -> Void
     let onDeleteSet: (SessionSet) -> Void
 
     @State private var repsInput: String = ""
     @State private var durationInput: String = ""
     @State private var weightInput: String = ""
+    @State private var hasInitialized: Bool = false
 
     var exercise: Exercise { detail.exercise }
     var templateExercise: TemplateExercise { detail.templateExercise }
@@ -458,18 +528,38 @@ struct CurrentExerciseView: View {
             UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         }
         .onAppear {
-            // Pre-fill with target values
-            if let reps = templateExercise.targetReps {
-                repsInput = "\(reps)"
-            }
-            if let duration = templateExercise.targetDuration {
-                durationInput = "\(duration)"
-            }
-            if let weight = templateExercise.targetWeight {
-                weightInput = weight.truncatingRemainder(dividingBy: 1) == 0
-                    ? "\(Int(weight))"
-                    : String(format: "%.1f", weight)
-            }
+            initializeInputs()
+        }
+        .onChange(of: detail.exercise.id) { _, _ in
+            // Re-initialize when exercise changes
+            hasInitialized = false
+            initializeInputs()
+        }
+    }
+
+    private func initializeInputs() {
+        guard !hasInitialized else { return }
+        hasInitialized = true
+
+        // Use last entered values if available, otherwise fall back to template defaults
+        if let lastReps = lastEnteredValues.reps {
+            repsInput = "\(lastReps)"
+        } else if let reps = templateExercise.targetReps {
+            repsInput = "\(reps)"
+        }
+
+        if let duration = templateExercise.targetDuration {
+            durationInput = "\(duration)"
+        }
+
+        if let lastWeight = lastEnteredValues.weight {
+            weightInput = lastWeight.truncatingRemainder(dividingBy: 1) == 0
+                ? "\(Int(lastWeight))"
+                : String(format: "%.1f", lastWeight)
+        } else if let weight = templateExercise.targetWeight {
+            weightInput = weight.truncatingRemainder(dividingBy: 1) == 0
+                ? "\(Int(weight))"
+                : String(format: "%.1f", weight)
         }
     }
 
@@ -480,9 +570,8 @@ struct CurrentExerciseView: View {
 
         onLogSet(reps, duration, weight)
 
-        // Keep weight, clear reps/duration for next set
-        repsInput = templateExercise.targetReps.map { "\($0)" } ?? ""
-        durationInput = templateExercise.targetDuration.map { "\($0)" } ?? ""
+        // Keep the entered values for the next set (don't reset to template defaults)
+        // The values stay as they are - user can modify if needed
     }
 }
 
