@@ -7,6 +7,8 @@ struct TodayView: View {
 
     @State private var showingTemplateList = false
     @State private var showingWorkout = false
+    @State private var showingWorkoutOverview = false
+    @State private var selectedRecentSession: SessionWithDetails?
 
     var todaySchedule: ScheduleDay? {
         scheduleViewModel.getTodaySchedule()
@@ -44,7 +46,15 @@ struct TodayView: View {
                     )
 
                     // Recent Workouts
-                    RecentWorkoutsSection(sessions: historyViewModel.sessions.prefix(3).map { $0 })
+                    RecentWorkoutsSection(
+                        sessions: historyViewModel.sessions.prefix(3).map { $0 },
+                        onOpenSession: { session in
+                            selectedRecentSession = session
+                        },
+                        onOpenAll: {
+                            showingWorkoutOverview = true
+                        }
+                    )
                 }
                 .padding()
             }
@@ -64,6 +74,20 @@ struct TodayView: View {
             .fullScreenCover(isPresented: $showingWorkout) {
                 LiveWorkoutView()
                     .environmentObject(workoutViewModel)
+            }
+            .sheet(item: $selectedRecentSession, onDismiss: {
+                Task {
+                    await historyViewModel.loadSessions()
+                }
+            }) { session in
+                HistoryDetailView(sessionId: session.session.id, viewModel: historyViewModel)
+            }
+            .sheet(isPresented: $showingWorkoutOverview, onDismiss: {
+                Task {
+                    await historyViewModel.loadSessions()
+                }
+            }) {
+                HistoryView()
             }
         }
     }
@@ -190,12 +214,23 @@ struct QuickActionButton: View {
 
 struct RecentWorkoutsSection: View {
     let sessions: [SessionWithDetails]
+    let onOpenSession: (SessionWithDetails) -> Void
+    let onOpenAll: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Recent Workouts")
-                .font(.headline)
-                .foregroundColor(.secondary)
+            HStack {
+                Text("Recent Workouts")
+                    .font(.headline)
+                    .foregroundColor(.secondary)
+
+                Spacer()
+
+                Button("View All") {
+                    onOpenAll()
+                }
+                .font(.subheadline)
+            }
 
             if sessions.isEmpty {
                 Text("No recent workouts")
@@ -205,7 +240,12 @@ struct RecentWorkoutsSection: View {
                     .padding()
             } else {
                 ForEach(sessions) { session in
-                    RecentWorkoutRow(session: session)
+                    Button {
+                        onOpenSession(session)
+                    } label: {
+                        RecentWorkoutRow(session: session)
+                    }
+                    .buttonStyle(.plain)
                 }
             }
         }
@@ -233,7 +273,11 @@ struct RecentWorkoutRow: View {
                     .font(.subheadline)
                     .fontWeight(.medium)
 
-                Text("\(session.totalSets) sets")
+                HStack(spacing: 4) {
+                    Image(systemName: "pencil")
+                        .font(.caption2)
+                    Text("\(session.totalSets) sets")
+                }
                     .font(.caption)
                     .foregroundColor(.secondary)
             }

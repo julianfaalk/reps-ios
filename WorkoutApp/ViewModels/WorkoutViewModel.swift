@@ -30,6 +30,9 @@ class WorkoutViewModel: ObservableObject {
     private var restTimer: Timer?
     private var defaultRestTime: Int = 90
     private var currentActivity: Activity<WorkoutActivityAttributes>?
+    private let variationHistoryKeyPrefix = "workout.variation.history."
+    private let variationHistoryDepth = 3
+    private let variationRetryCount = 8
 
     // Timestamps for background persistence
     private var workoutStartTime: Date?
@@ -128,7 +131,11 @@ class WorkoutViewModel: ObservableObject {
 
             var templateName = "Free Workout"
             if let templateId = templateId {
-                templateExercises = try db.fetchTemplateExercises(templateId: templateId)
+                let baseTemplateExercises = try db.fetchTemplateExercises(templateId: templateId)
+                templateExercises = try buildVariedTemplateExercises(
+                    templateId: templateId,
+                    baseExercises: baseTemplateExercises
+                )
                 if let template = try? db.fetchTemplate(id: templateId) {
                     templateName = template.name
                 }
@@ -481,5 +488,279 @@ class WorkoutViewModel: ObservableObject {
 
     var formattedRestTime: String {
         formatDuration(restTimeRemaining)
+    }
+
+    // MARK: - Template Variation
+
+    private func buildVariedTemplateExercises(
+        templateId: UUID,
+        baseExercises: [TemplateExerciseDetail]
+    ) throws -> [TemplateExerciseDetail] {
+        guard baseExercises.count > 1 else { return baseExercises }
+
+        let allExercises = try db.fetchAllExercises()
+        let recentSignatures = loadVariationHistory(templateId: templateId)
+        let blockedSignatures = Array(recentSignatures.prefix(2))
+        let recentUsagePenalty = recentExercisePenalty(templateId: templateId)
+        let slotCandidates = buildSlotCandidates(baseExercises: baseExercises, allExercises: allExercises)
+
+        var candidate = baseExercises
+        var selectedSignature = signature(for: candidate)
+
+        for _ in 0..<variationRetryCount {
+            let next = generateVariationCandidate(
+                baseExercises: baseExercises,
+                slotCandidates: slotCandidates,
+                recentUsagePenalty: recentUsagePenalty
+            )
+            let nextSignature = signature(for: next)
+            candidate = next
+            selectedSignature = nextSignature
+
+            if !blockedSignatures.contains(nextSignature) {
+                break
+            }
+        }
+
+        if blockedSignatures.contains(selectedSignature) {
+            candidate = forceSingleSlotChange(
+                candidate: candidate,
+                baseExercises: baseExercises,
+                slotCandidates: slotCandidates,
+                blockedSignatures: blockedSignatures
+            )
+            selectedSignature = signature(for: candidate)
+        }
+
+        saveVariationSignature(selectedSignature, templateId: templateId)
+        return candidate
+    }
+
+    private func buildSlotCandidates(
+        baseExercises: [TemplateExerciseDetail],
+        allExercises: [Exercise]
+    ) -> [[Exercise]] {
+        baseExercises.map { detail in
+            let baseMuscles = normalizedMuscles(detail.exercise.muscleGroups)
+
+            return allExercises
+                .filter { candidate in
+                    guard candidate.exerciseType == detail.exercise.exerciseType else { return false }
+
+                    if candidate.id == detail.exercise.id {
+                        return true
+                    }
+
+                    let candidateMuscles = normalizedMuscles(candidate.muscleGroups)
+                    guard !baseMuscles.isEmpty, !candidateMuscles.isEmpty else { return false }
+
+                    return !baseMuscles.isDisjoint(with: candidateMuscles)
+                }
+                .sorted { $0.name < $1.name }
+        }
+    }
+
+    private func generateVariationCandidate(
+        baseExercises: [TemplateExerciseDetail],
+        slotCandidates: [[Exercise]],
+        recentUsagePenalty: [UUID: Double]
+    ) -> [TemplateExerciseDetail] {
+        var result: [TemplateExerciseDetail] = []
+        var usedExerciseIDs = Set<UUID>()
+
+        for index in baseExercises.indices {
+            let base = baseExercises[index]
+            let isAnchorSlot = index == 0
+
+            if isAnchorSlot {
+                result.append(detailWithExercise(base: base, exercise: base.exercise, sortOrder: index))
+                usedExerciseIDs.insert(base.exercise.id)
+                continue
+            }
+
+            let candidates = slotCandidates[index]
+            if candidates.isEmpty {
+                result.append(detailWithExercise(base: base, exercise: base.exercise, sortOrder: index))
+                usedExerciseIDs.insert(base.exercise.id)
+                continue
+            }
+
+            let ranked = candidates
+                .map { exercise -> (Exercise, Double) in
+                    var score = Double.random(in: 0...0.6)
+
+                    if usedExerciseIDs.contains(exercise.id) {
+                        score += 100
+                    }
+
+                    // Keep some continuity while still preferring variation.
+                    if exercise.id == base.exercise.id {
+                        score += 1.2
+                    }
+
+                    score += recentUsagePenalty[exercise.id] ?? 0
+                    return (exercise, score)
+                }
+                .sorted { $0.1 < $1.1 }
+
+            let topCount = min(3, ranked.count)
+            let picked = topCount > 1
+                ? ranked[Int.random(in: 0..<topCount)].0
+                : ranked[0].0
+
+            result.append(detailWithExercise(base: base, exercise: picked, sortOrder: index))
+            usedExerciseIDs.insert(picked.id)
+        }
+
+        return result
+    }
+
+    private func forceSingleSlotChange(
+        candidate: [TemplateExerciseDetail],
+        baseExercises: [TemplateExerciseDetail],
+        slotCandidates: [[Exercise]],
+        blockedSignatures: [String]
+    ) -> [TemplateExerciseDetail] {
+        guard candidate.count > 1 else { return candidate }
+
+        var updated = candidate
+        var used = Set(updated.map { $0.exercise.id })
+
+        for index in 1..<updated.count {
+            let currentExerciseId = updated[index].exercise.id
+            for alternative in slotCandidates[index] {
+                guard alternative.id != currentExerciseId else { continue }
+                guard !used.contains(alternative.id) else { continue }
+
+                used.remove(currentExerciseId)
+                used.insert(alternative.id)
+                updated[index] = detailWithExercise(
+                    base: baseExercises[index],
+                    exercise: alternative,
+                    sortOrder: index
+                )
+
+                let newSignature = signature(for: updated)
+                if !blockedSignatures.contains(newSignature) {
+                    return updated
+                }
+
+                used.remove(alternative.id)
+                used.insert(currentExerciseId)
+                updated[index] = candidate[index]
+            }
+        }
+
+        return candidate
+    }
+
+    private func detailWithExercise(
+        base: TemplateExerciseDetail,
+        exercise: Exercise,
+        sortOrder: Int
+    ) -> TemplateExerciseDetail {
+        var templateExercise = base.templateExercise
+        templateExercise.exerciseId = exercise.id
+        templateExercise.sortOrder = sortOrder
+        return TemplateExerciseDetail(templateExercise: templateExercise, exercise: exercise)
+    }
+
+    private func recentExercisePenalty(templateId: UUID) -> [UUID: Double] {
+        var penalty: [UUID: Double] = [:]
+
+        let recentSignatures = loadVariationHistory(templateId: templateId)
+        for (index, signature) in recentSignatures.prefix(2).enumerated() {
+            let score = index == 0 ? 3.0 : 1.5
+            for exerciseId in parseSignature(signature) {
+                penalty[exerciseId, default: 0] += score
+            }
+        }
+
+        let recentSessionExercises = fetchRecentTemplateExerciseUsage(templateId: templateId, limit: 2)
+        for (index, exerciseIds) in recentSessionExercises.enumerated() {
+            let score = index == 0 ? 2.0 : 1.0
+            for exerciseId in exerciseIds {
+                penalty[exerciseId, default: 0] += score
+            }
+        }
+
+        return penalty
+    }
+
+    private func fetchRecentTemplateExerciseUsage(templateId: UUID, limit: Int) -> [[UUID]] {
+        do {
+            let sessions = try db.fetchRecentSessions(limit: 30)
+                .filter { $0.session.templateId == templateId }
+                .prefix(limit)
+
+            return sessions.map { session in
+                Array(Set(session.sets.map { $0.exercise.id }))
+            }
+        } catch {
+            return []
+        }
+    }
+
+    private func normalizedMuscles(_ muscles: [String]) -> Set<String> {
+        Set(muscles.map { normalizeMuscleName($0) }.filter { !$0.isEmpty })
+    }
+
+    private func normalizeMuscleName(_ muscle: String) -> String {
+        let normalized = muscle
+            .lowercased()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        switch normalized {
+        case "front delts", "rear delts", "shoulders", "vordere schulter", "hintere schulter":
+            return "shoulders"
+        case "upper back", "lower back", "back", "rücken":
+            return "back"
+        case "abs", "core", "bauch":
+            return "core"
+        case "chest", "brust":
+            return "chest"
+        case "triceps", "trizeps":
+            return "triceps"
+        case "biceps", "bizeps":
+            return "biceps"
+        case "forearms", "unterarme":
+            return "forearms"
+        case "glutes", "gesäß":
+            return "glutes"
+        case "hamstrings", "beinbeuger":
+            return "hamstrings"
+        case "quads", "quadriceps", "vorderer oberschenkel":
+            return "quadriceps"
+        case "calves", "waden":
+            return "calves"
+        default:
+            return normalized
+        }
+    }
+
+    private func signature(for exercises: [TemplateExerciseDetail]) -> String {
+        exercises.map { $0.exercise.id.uuidString }.joined(separator: "|")
+    }
+
+    private func parseSignature(_ signature: String) -> [UUID] {
+        signature
+            .split(separator: "|")
+            .compactMap { UUID(uuidString: String($0)) }
+    }
+
+    private func variationHistoryKey(templateId: UUID) -> String {
+        "\(variationHistoryKeyPrefix)\(templateId.uuidString)"
+    }
+
+    private func loadVariationHistory(templateId: UUID) -> [String] {
+        UserDefaults.standard.stringArray(forKey: variationHistoryKey(templateId: templateId)) ?? []
+    }
+
+    private func saveVariationSignature(_ signature: String, templateId: UUID) {
+        var history = loadVariationHistory(templateId: templateId)
+        history.removeAll { $0 == signature }
+        history.insert(signature, at: 0)
+        history = Array(history.prefix(variationHistoryDepth))
+        UserDefaults.standard.set(history, forKey: variationHistoryKey(templateId: templateId))
     }
 }

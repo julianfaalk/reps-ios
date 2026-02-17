@@ -30,44 +30,48 @@ struct LiveWorkoutView: View {
                         onDismiss: { viewModel.stopRestTimer() },
                         onAddTime: { seconds in viewModel.addRestTime(seconds) }
                     )
+                    .padding(.horizontal, 12)
+                    .padding(.top, 8)
+                    .padding(.bottom, 4)
                     .transition(.move(edge: .top).combined(with: .opacity))
                 }
 
                 // Main content
-                if let currentExercise = viewModel.currentExercise {
-                    CurrentExerciseView(
-                        detail: currentExercise,
-                        completedSets: viewModel.completedSetsForCurrentExercise,
-                        lastEnteredValues: viewModel.getLastEnteredValues(for: currentExercise.exercise.id),
-                        onLogSet: { reps, duration, weight in
-                            // Save last entered values for this exercise
-                            viewModel.setLastEnteredValues(
-                                for: currentExercise.exercise.id,
-                                reps: reps,
-                                weight: weight
-                            )
-                            Task {
-                                await viewModel.logSet(reps: reps, duration: duration, weight: weight)
+                Group {
+                    if let currentExercise = viewModel.currentExercise {
+                        CurrentExerciseView(
+                            detail: currentExercise,
+                            completedSets: viewModel.completedSetsForCurrentExercise,
+                            lastEnteredValues: viewModel.getLastEnteredValues(for: currentExercise.exercise.id),
+                            onLogSet: { reps, duration, weight in
+                                // Save last entered values for this exercise
+                                viewModel.setLastEnteredValues(
+                                    for: currentExercise.exercise.id,
+                                    reps: reps,
+                                    weight: weight
+                                )
+                                Task {
+                                    await viewModel.logSet(reps: reps, duration: duration, weight: weight)
+                                }
+                            },
+                            onDeleteSet: { set in
+                                Task {
+                                    await viewModel.deleteSet(set)
+                                }
                             }
-                        },
-                        onDeleteSet: { set in
-                            Task {
-                                await viewModel.deleteSet(set)
-                            }
-                        }
-                    )
-                } else if viewModel.templateExercises.isEmpty {
-                    EmptyWorkoutView(
-                        onAddExercise: { showingAddExercise = true },
-                        onAddCardio: { showingAddCardio = true }
-                    )
-                } else {
-                    WorkoutCompletedView()
+                        )
+                    } else if viewModel.templateExercises.isEmpty {
+                        EmptyWorkoutView(
+                            onAddExercise: { showingAddExercise = true },
+                            onAddCardio: { showingAddCardio = true }
+                        )
+                    } else {
+                        WorkoutCompletedView()
+                    }
                 }
-
-                Spacer()
-
-                // Bottom navigation
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            }
+            .safeAreaInset(edge: .bottom) {
                 WorkoutNavigationBar(
                     currentIndex: viewModel.currentExerciseIndex,
                     totalExercises: viewModel.templateExercises.count,
@@ -78,6 +82,7 @@ struct LiveWorkoutView: View {
                     isLastExercise: viewModel.isLastExercise
                 )
             }
+            .animation(.easeInOut(duration: 0.2), value: viewModel.isRestTimerActive)
             .navigationTitle("Workout")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -221,81 +226,86 @@ struct RestTimerView: View {
     }
 
     var body: some View {
-        VStack(spacing: 20) {
-            Text("Rest")
-                .font(.headline)
-                .foregroundColor(.secondary)
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 14) {
+                timerCircle(diameter: 140)
+                restControls(maxWidth: 220)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
-            // Circular progress timer
-            ZStack {
-                // Background circle
-                Circle()
-                    .stroke(Color(.systemGray4), lineWidth: 12)
-                    .frame(width: 180, height: 180)
+            VStack(spacing: 12) {
+                timerCircle(diameter: 168)
+                restControls(maxWidth: .infinity)
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .padding(14)
+        .background(Color(.systemGray6))
+        .clipShape(RoundedRectangle(cornerRadius: 18))
+    }
 
-                // Progress circle
-                Circle()
-                    .trim(from: 0, to: progress)
-                    .stroke(progressColor, style: StrokeStyle(lineWidth: 12, lineCap: .round))
-                    .frame(width: 180, height: 180)
-                    .rotationEffect(.degrees(-90))
-                    .animation(.linear(duration: 0.5), value: progress)
+    private func timerCircle(diameter: CGFloat) -> some View {
+        ZStack {
+            Circle()
+                .stroke(Color(.systemGray4), lineWidth: 10)
+                .frame(width: diameter, height: diameter)
 
-                // Time display
+            Circle()
+                .trim(from: 0, to: progress)
+                .stroke(progressColor, style: StrokeStyle(lineWidth: 10, lineCap: .round))
+                .frame(width: diameter, height: diameter)
+                .rotationEffect(.degrees(-90))
+                .animation(.linear(duration: 0.5), value: progress)
+
+            VStack(spacing: 2) {
+                Text("Rest")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.secondary)
                 Text(formattedTime)
-                    .font(.system(size: 48, weight: .bold, design: .rounded))
+                    .font(.system(size: diameter * 0.22, weight: .bold, design: .rounded))
                     .monospacedDigit()
             }
+        }
+    }
 
-            // +/- buttons row
-            HStack(spacing: 12) {
-                Button {
-                    onAddTime(-10)
-                } label: {
-                    Text("-10s")
-                        .font(.headline)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 10)
-                        .background(Color(.systemGray5))
-                        .cornerRadius(10)
-                }
-
-                Button {
-                    onAddTime(10)
-                } label: {
-                    Text("+10s")
-                        .font(.headline)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 10)
-                        .background(Color(.systemGray5))
-                        .cornerRadius(10)
-                }
-
-                Button {
-                    onAddTime(30)
-                } label: {
-                    Text("+30s")
-                        .font(.headline)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 10)
-                        .background(Color(.systemGray5))
-                        .cornerRadius(10)
-                }
+    private func restControls(maxWidth: CGFloat) -> some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 8) {
+                RestAdjustButton(label: "-10s") { onAddTime(-10) }
+                RestAdjustButton(label: "+10s") { onAddTime(10) }
+                RestAdjustButton(label: "+30s") { onAddTime(30) }
             }
+            .frame(maxWidth: .infinity)
 
             Button(action: onDismiss) {
                 Label("Skip Rest", systemImage: "forward.fill")
                     .font(.headline)
-                    .padding(.horizontal, 24)
+                    .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
                     .background(Color.accentColor)
                     .foregroundColor(.white)
-                    .cornerRadius(12)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
             }
         }
-        .padding()
-        .frame(maxWidth: .infinity)
-        .background(Color(.systemBackground))
+        .frame(maxWidth: maxWidth)
+    }
+}
+
+private struct RestAdjustButton: View {
+    let label: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(label)
+                .font(.headline)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
+                .background(Color(.systemGray5))
+                .foregroundColor(.accentColor)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+        }
     }
 }
 
@@ -329,12 +339,12 @@ struct CurrentExerciseView: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 20) {
-                // Exercise header
-                VStack(spacing: 8) {
+            VStack(spacing: 14) {
+                VStack(alignment: .leading, spacing: 10) {
                     Text(exercise.name)
-                        .font(.title)
+                        .font(.title2)
                         .fontWeight(.bold)
+                        .frame(maxWidth: .infinity, alignment: .leading)
 
                     if !exercise.muscleGroups.isEmpty {
                         Text(exercise.muscleGroups.joined(separator: ", "))
@@ -344,13 +354,12 @@ struct CurrentExerciseView: View {
 
                     if let notes = exercise.notes, !notes.isEmpty {
                         Text(notes)
-                            .font(.caption)
+                            .font(.callout)
                             .foregroundColor(.secondary)
                             .italic()
                     }
 
-                    // Target info
-                    HStack(spacing: 16) {
+                    HStack(spacing: 10) {
                         if let sets = templateExercise.targetSets {
                             TargetBadge(label: "Sets", value: "\(sets)")
                         }
@@ -365,10 +374,11 @@ struct CurrentExerciseView: View {
                         }
                     }
                 }
-                .padding()
+                .padding(16)
+                .background(Color(.systemGray6))
+                .clipShape(RoundedRectangle(cornerRadius: 16))
 
-                // Input section
-                VStack(spacing: 16) {
+                VStack(spacing: 14) {
                     HStack(spacing: 8) {
                         Text("Set \(completedSets.count + 1)")
                             .font(.headline)
@@ -385,102 +395,52 @@ struct CurrentExerciseView: View {
                                     .foregroundColor(.secondary)
                             }
                         }
+
+                        Spacer()
                     }
 
                     if exercise.exerciseType == .reps {
-                        HStack(spacing: 16) {
-                            VStack {
-                                Text("Reps")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                                TextField("0", text: $repsInput)
-                                    .keyboardType(.numberPad)
-                                    .textFieldStyle(.roundedBorder)
-                                    .toolbar {
-                                        ToolbarItemGroup(placement: .keyboard) {
-                                            Spacer()
-                                            Button("Done") {
-                                                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                                            }
-                                        }
-                                    }
-                                    .frame(width: 80)
-                                    .multilineTextAlignment(.center)
-                            }
-
-                            VStack {
-                                Text(equipmentIsBarbell ? "Gesamt kg" : "Weight (kg)")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                                TextField("0", text: $weightInput)
-                                    .keyboardType(.decimalPad)
-                                    .textFieldStyle(.roundedBorder)
-                                    .toolbar {
-                                        ToolbarItemGroup(placement: .keyboard) {
-                                            Spacer()
-                                            Button("Done") {
-                                                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                                            }
-                                        }
-                                    }
-                                    .frame(width: 100)
-                                    .multilineTextAlignment(.center)
-                            }
+                        HStack(spacing: 10) {
+                            WorkoutInputField(
+                                title: "Reps",
+                                text: $repsInput,
+                                keyboardType: .numberPad
+                            )
+                            WorkoutInputField(
+                                title: equipmentIsBarbell ? "Gesamt kg" : "Weight (kg)",
+                                text: $weightInput,
+                                keyboardType: .decimalPad
+                            )
                         }
 
                         if equipmentIsBarbell {
-                            Text("Gesamtgewicht der Langhantel (Stange + Scheiben)")
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
-                                .multilineTextAlignment(.center)
+                            VStack(spacing: 3) {
+                                Text("Gesamtgewicht der Langhantel (Stange + Scheiben)")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                                    .multilineTextAlignment(.center)
 
-                            if let weight = parseDecimal(weightInput), weight >= 20 {
-                                let perSide = (weight - 20) / 2
-                                Text("= 20 kg Stange + \(String(format: "%.1f", perSide)) kg pro Seite")
-                                    .font(.caption)
-                                    .foregroundColor(.accentColor)
-                                    .fontWeight(.medium)
+                                if let weight = parseDecimal(weightInput), weight >= 20 {
+                                    let perSide = (weight - 20) / 2
+                                    Text("= 20 kg Stange + \(String(format: "%.1f", perSide)) kg pro Seite")
+                                        .font(.caption)
+                                        .foregroundColor(.accentColor)
+                                        .fontWeight(.medium)
+                                }
                             }
                         }
                     } else {
-                        HStack(spacing: 16) {
-                            VStack {
-                                Text("Duration (sec)")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                                TextField("0", text: $durationInput)
-                                    .keyboardType(.numberPad)
-                                    .textFieldStyle(.roundedBorder)
-                                    .frame(width: 80)
-                                    .multilineTextAlignment(.center)
-                                    .toolbar {
-                                        ToolbarItemGroup(placement: .keyboard) {
-                                            Spacer()
-                                            Button("Done") {
-                                                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                                            }
-                                        }
-                                    }
-                            }
-
-                            VStack {
-                                Text("Weight (kg)")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                                TextField("0", text: $weightInput)
-                                    .keyboardType(.decimalPad)
-                                    .textFieldStyle(.roundedBorder)
-                                    .frame(width: 80)
-                                    .multilineTextAlignment(.center)
-                                    .toolbar {
-                                        ToolbarItemGroup(placement: .keyboard) {
-                                            Spacer()
-                                            Button("Done") {
-                                                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                                            }
-                                        }
-                                    }
-                            }
+                        HStack(spacing: 10) {
+                            WorkoutInputField(
+                                title: "Duration (sec)",
+                                text: $durationInput,
+                                keyboardType: .numberPad
+                            )
+                            WorkoutInputField(
+                                title: "Weight (kg)",
+                                text: $weightInput,
+                                keyboardType: .decimalPad
+                            )
                         }
                     }
 
@@ -490,19 +450,18 @@ struct CurrentExerciseView: View {
                         Label("Log Set", systemImage: "checkmark.circle.fill")
                             .font(.headline)
                             .frame(maxWidth: .infinity)
-                            .padding()
+                            .padding(.vertical, 14)
                             .background(Color.accentColor)
                             .foregroundColor(.white)
-                            .cornerRadius(12)
+                            .clipShape(RoundedRectangle(cornerRadius: 14))
                     }
                 }
-                .padding()
+                .padding(16)
                 .background(Color(.systemGray6))
-                .cornerRadius(16)
+                .clipShape(RoundedRectangle(cornerRadius: 16))
 
-                // Completed sets
                 if !completedSets.isEmpty {
-                    VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 10) {
                         Text("Completed Sets")
                             .font(.headline)
 
@@ -517,10 +476,11 @@ struct CurrentExerciseView: View {
                                 }
                         }
                     }
-                    .padding()
                 }
             }
-            .padding()
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .padding(.bottom, 12)
         }
         .scrollDismissesKeyboard(.immediately)
         .onTapGesture {
@@ -594,6 +554,36 @@ struct TargetBadge: View {
     }
 }
 
+struct WorkoutInputField: View {
+    let title: String
+    @Binding var text: String
+    let keyboardType: UIKeyboardType
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+
+            TextField("0", text: $text)
+                .keyboardType(keyboardType)
+                .textFieldStyle(.roundedBorder)
+                .multilineTextAlignment(.center)
+                .toolbar {
+                    ToolbarItemGroup(placement: .keyboard) {
+                        Spacer()
+                        Button("Done") {
+                            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                        }
+                    }
+                }
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
 struct CompletedSetRow: View {
     let set: SessionSet
     let exerciseType: ExerciseType
@@ -616,7 +606,7 @@ struct CompletedSetRow: View {
                 }
             }
 
-            if let weight = set.weight {
+            if set.weight != nil {
                 Text("@ \(set.formattedWeight)")
             }
 
