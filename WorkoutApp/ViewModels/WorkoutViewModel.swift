@@ -1,11 +1,17 @@
 import Foundation
 import SwiftUI
 import Combine
+#if canImport(ActivityKit)
 import ActivityKit
+#endif
+#if canImport(UIKit)
+import UIKit
+#endif
 
 @MainActor
 class WorkoutViewModel: ObservableObject {
     @Published var currentSession: WorkoutSession?
+    @Published var currentDayPlan: WorkoutDayPlanWithExercises?
     @Published var currentExerciseIndex: Int = 0
     @Published var templateExercises: [TemplateExerciseDetail] = []
     @Published var completedSets: [SessionSet] = []
@@ -25,11 +31,14 @@ class WorkoutViewModel: ObservableObject {
     // Track last entered values per exercise during this session
     private var lastEnteredValues: [UUID: (reps: Int?, weight: Double?)] = [:]
 
-    private let db = DatabaseService.shared
+    private let db: DatabaseService
+    private let planGenerator = WorkoutPlanGenerator()
     private var workoutTimer: Timer?
     private var restTimer: Timer?
     private var defaultRestTime: Int = 90
+#if canImport(ActivityKit)
     private var currentActivity: Activity<WorkoutActivityAttributes>?
+#endif
     private let categoryVariantKeyPrefix = "workout.variation.category.last."
     private let warmupCardioTag = "[warmup]"
     private let sessionExerciseCachePrefix = "workout.session.exercises."
@@ -61,7 +70,16 @@ class WorkoutViewModel: ObservableObject {
         }
     }
 
-    init() {
+    var canShuffleCurrentWorkout: Bool {
+        currentDayPlan != nil && completedSets.isEmpty
+    }
+
+    var currentPlanExercises: [WorkoutDayPlanExerciseDetail] {
+        currentDayPlan?.exercises ?? []
+    }
+
+    init(db: DatabaseService = .shared) {
+        self.db = db
         loadSettings()
         setupBackgroundObservers()
         Task { @MainActor in
@@ -79,6 +97,7 @@ class WorkoutViewModel: ObservableObject {
     }
 
     private func setupBackgroundObservers() {
+#if canImport(UIKit)
         NotificationCenter.default.addObserver(
             forName: UIApplication.willResignActiveNotification,
             object: nil,
@@ -98,6 +117,7 @@ class WorkoutViewModel: ObservableObject {
                 self?.handleAppDidBecomeActive()
             }
         }
+#endif
     }
 
     private func handleAppWillResignActive() {
@@ -137,47 +157,113 @@ class WorkoutViewModel: ObservableObject {
     // MARK: - Session Management
 
     func startSession(templateId: UUID?) async {
-        let session = WorkoutSession(templateId: templateId)
-
         do {
-            try db.saveSession(session)
-            currentSession = session
-
-            var templateName = "Free Workout"
             if let templateId = templateId {
-                if let template = try? db.fetchTemplate(id: templateId) {
-                    templateName = template.name
-                }
-
-                let baseTemplateExercises = try db.fetchTemplateExercises(templateId: templateId)
-                templateExercises = try buildVariedTemplateExercises(
-                    templateId: templateId,
-                    baseExercises: baseTemplateExercises
-                )
+                let dayPlan = try loadOrCreateDayPlan(templateId: templateId, date: Date())
+                await startSession(dayPlan: dayPlan)
+            } else {
+                try startAdHocSessionInternal()
             }
-
-            currentExerciseIndex = 0
-            completedSets = []
-            cardioSessions = []
-            workoutDuration = 0
-            workoutPausedDuration = 0
-            workoutStartTime = session.startedAt
-            sessionNotes = ""
-            newPRs = []
-            lastEnteredValues = [:]
-            templateExercises = try applyPersistedExerciseDefaults(to: templateExercises)
-            isWorkoutActive = true
-
-            startWorkoutTimer()
-            persistSessionStateCache()
-            startLiveActivity(templateName: templateName)
         } catch {
             errorMessage = error.localizedDescription
         }
     }
 
     func startAdHocSession() async {
-        await startSession(templateId: nil)
+        do {
+            try startAdHocSessionInternal()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func startSession(dayPlan: WorkoutDayPlanWithExercises) async {
+        do {
+            try startSessionInternal(dayPlan: dayPlan)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func startAdHocSessionInternal() throws {
+        let session = WorkoutSession(templateId: nil, dayPlanId: nil)
+        try db.saveSession(session)
+
+        currentSession = session
+        currentDayPlan = nil
+        templateExercises = []
+        currentExerciseIndex = 0
+        completedSets = []
+        cardioSessions = []
+        workoutDuration = 0
+        workoutPausedDuration = 0
+        workoutStartTime = session.startedAt
+        sessionNotes = ""
+        newPRs = []
+        lastEnteredValues = [:]
+        isWorkoutActive = true
+
+        startWorkoutTimer()
+        persistSessionStateCache()
+        startLiveActivity(templateName: "Free Workout")
+    }
+
+    private func startSessionInternal(dayPlan: WorkoutDayPlanWithExercises) throws {
+        let session = WorkoutSession(templateId: dayPlan.template.id, dayPlanId: dayPlan.plan.id)
+        try db.saveSession(session)
+
+        currentSession = session
+        currentDayPlan = dayPlan
+        currentExerciseIndex = 0
+        completedSets = []
+        cardioSessions = []
+        workoutDuration = 0
+        workoutPausedDuration = 0
+        workoutStartTime = session.startedAt
+        sessionNotes = ""
+        newPRs = []
+        lastEnteredValues = [:]
+        templateExercises = try applyPersistedExerciseDefaults(
+            to: dayPlan.exercises.map(\.asTemplateExerciseDetail)
+        )
+        isWorkoutActive = true
+
+        startWorkoutTimer()
+        persistSessionStateCache()
+        startLiveActivity(templateName: dayPlan.template.name)
+    }
+
+    private func loadOrCreateDayPlan(templateId: UUID, date: Date) throws -> WorkoutDayPlanWithExercises {
+        if let existing = try db.fetchWorkoutDayPlan(date: date, templateId: templateId) {
+            return existing
+        }
+
+        guard let template = try db.fetchTemplate(id: templateId) else {
+            throw NSError(
+                domain: "WorkoutViewModel",
+                code: 404,
+                userInfo: [NSLocalizedDescriptionKey: "The selected template could not be found."]
+            )
+        }
+
+        let baseExercises = try db.fetchTemplateExercises(templateId: templateId)
+        let allExercises = try db.fetchAllExercises()
+        let previousPlan = try db.fetchLatestPlanSnapshot(templateId: templateId, before: date)
+            ?? db.fetchLatestCompletedSessionSnapshot(templateId: templateId, before: date)
+        let build = try planGenerator.buildPlan(
+            template: template,
+            baseExercises: baseExercises,
+            allExercises: allExercises,
+            previousPlan: previousPlan,
+            shuffleSeed: 0
+        )
+
+        return try db.saveWorkoutDayPlan(
+            date: date,
+            template: template,
+            exercises: build.exercises,
+            shuffleCount: 0
+        )
     }
 
     func completeSession() async -> SessionWithDetails? {
@@ -195,6 +281,7 @@ class WorkoutViewModel: ObservableObject {
             try db.saveSession(session)
             clearSessionStateCache(sessionId: session.id)
             currentSession = nil
+            currentDayPlan = nil
             isWorkoutActive = false
 
             return try db.fetchSessionWithDetails(id: session.id)
@@ -215,10 +302,55 @@ class WorkoutViewModel: ObservableObject {
         }
 
         currentSession = nil
+        currentDayPlan = nil
         isWorkoutActive = false
         templateExercises = []
         completedSets = []
         cardioSessions = []
+    }
+
+    func shuffleCurrentWorkout() async -> String? {
+        guard completedSets.isEmpty else {
+            return "Shuffle is only available before you log the first set."
+        }
+
+        guard let currentDayPlan else {
+            return "This workout was not started from a generated day plan."
+        }
+
+        do {
+            let baseExercises = try db.fetchTemplateExercises(templateId: currentDayPlan.template.id)
+            let allExercises = try db.fetchAllExercises()
+            let previousPlan = snapshots(from: currentDayPlan)
+            let nextShuffleCount = currentDayPlan.plan.shuffleCount + 1
+            let build = try planGenerator.buildPlan(
+                template: currentDayPlan.template,
+                baseExercises: baseExercises,
+                allExercises: allExercises,
+                previousPlan: previousPlan,
+                shuffleSeed: nextShuffleCount
+            )
+
+            let updatedPlan = try db.saveWorkoutDayPlan(
+                date: currentDayPlan.plan.date,
+                template: currentDayPlan.template,
+                exercises: build.exercises,
+                shuffleCount: nextShuffleCount,
+                existingPlanId: currentDayPlan.plan.id
+            )
+
+            self.currentDayPlan = updatedPlan
+            lastEnteredValues = [:]
+            templateExercises = try applyPersistedExerciseDefaults(
+                to: updatedPlan.exercises.map(\.asTemplateExerciseDetail)
+            )
+            currentExerciseIndex = 0
+            persistSessionStateCache()
+            updateLiveActivity()
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
     }
 
     // MARK: - Exercise Navigation
@@ -455,14 +587,17 @@ class WorkoutViewModel: ObservableObject {
     }
 
     private func triggerRestTimerEnd() {
+#if canImport(UIKit)
         // Haptic feedback
         let generator = UINotificationFeedbackGenerator()
         generator.notificationOccurred(.success)
+#endif
     }
 
     // MARK: - Live Activity
 
     private func startLiveActivity(templateName: String) {
+#if canImport(ActivityKit)
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
 
         let exerciseName = currentExercise?.exercise.name ?? "Ready"
@@ -492,9 +627,11 @@ class WorkoutViewModel: ObservableObject {
         } catch {
             print("Failed to start Live Activity: \(error)")
         }
+#endif
     }
 
     private func updateLiveActivity() {
+#if canImport(ActivityKit)
         guard let activity = currentActivity else { return }
 
         let exerciseName = currentExercise?.exercise.name ?? "Done"
@@ -515,9 +652,11 @@ class WorkoutViewModel: ObservableObject {
             let content = ActivityContent(state: state, staleDate: nil)
             await activity.update(content)
         }
+#endif
     }
 
     private func endLiveActivity() {
+#if canImport(ActivityKit)
         guard let activity = currentActivity else { return }
 
         let finalState = WorkoutActivityAttributes.ContentState(
@@ -535,6 +674,7 @@ class WorkoutViewModel: ObservableObject {
         }
 
         currentActivity = nil
+#endif
     }
 
     // MARK: - Helpers
@@ -579,6 +719,11 @@ class WorkoutViewModel: ObservableObject {
         do {
             guard let activeSession = try db.fetchActiveSession() else { return }
             currentSession = activeSession
+            if let dayPlanId = activeSession.dayPlanId {
+                currentDayPlan = try db.fetchWorkoutDayPlan(id: dayPlanId)
+            } else {
+                currentDayPlan = nil
+            }
             isWorkoutActive = true
 
             workoutStartTime = activeSession.startedAt
@@ -598,6 +743,10 @@ class WorkoutViewModel: ObservableObject {
             lastEnteredValues = [:]
             if let cachedExercises = loadCachedTemplateExercises(sessionId: activeSession.id), !cachedExercises.isEmpty {
                 templateExercises = cachedExercises
+            } else if let currentDayPlan {
+                templateExercises = try applyPersistedExerciseDefaults(
+                    to: currentDayPlan.exercises.map(\.asTemplateExerciseDetail)
+                )
             } else if let templateId = activeSession.templateId {
                 templateExercises = try applyPersistedExerciseDefaults(
                     to: db.fetchTemplateExercises(templateId: templateId)
@@ -622,6 +771,7 @@ class WorkoutViewModel: ObservableObject {
     }
 
     private func ensureLiveActivityForCurrentSession() {
+#if canImport(ActivityKit)
         if let existing = Activity<WorkoutActivityAttributes>.activities.first {
             currentActivity = existing
             return
@@ -636,6 +786,7 @@ class WorkoutViewModel: ObservableObject {
         }
 
         startLiveActivity(templateName: templateName)
+#endif
     }
 
     private func restoredExerciseIndex(sessionId: UUID) -> Int {
@@ -692,6 +843,16 @@ class WorkoutViewModel: ObservableObject {
     private func clearSessionStateCache(sessionId: UUID) {
         UserDefaults.standard.removeObject(forKey: sessionExerciseCacheKey(sessionId: sessionId))
         UserDefaults.standard.removeObject(forKey: sessionIndexCacheKey(sessionId: sessionId))
+    }
+
+    private func snapshots(from dayPlan: WorkoutDayPlanWithExercises) -> [WorkoutPlanExerciseSnapshot] {
+        dayPlan.exercises.map {
+            WorkoutPlanExerciseSnapshot(
+                exercise: $0.exercise,
+                sortOrder: $0.planExercise.sortOrder,
+                isAnchor: $0.planExercise.isAnchor
+            )
+        }
     }
 
     // MARK: - Template Variation

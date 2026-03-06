@@ -11,6 +11,7 @@ struct LiveWorkoutView: View {
     @State private var showingSessionSummary = false
     @State private var warmupCardioType: CardioType = .treadmill
     @State private var completedSession: SessionWithDetails?
+    @State private var shuffleMessage: String?
 
     var body: some View {
         NavigationStack {
@@ -41,6 +42,23 @@ struct LiveWorkoutView: View {
                 Group {
                     if let currentExercise = viewModel.currentExercise {
                         VStack(spacing: 10) {
+                            if !viewModel.currentPlanExercises.isEmpty {
+                                WorkoutPlanPreviewCard(
+                                    exercises: viewModel.currentPlanExercises,
+                                    canShuffle: viewModel.canShuffleCurrentWorkout,
+                                    message: shuffleMessage ?? (viewModel.currentDayPlan != nil && !viewModel.canShuffleCurrentWorkout
+                                        ? "Plan locked after the first logged set."
+                                        : nil),
+                                    onShuffle: {
+                                        Task {
+                                            shuffleMessage = await viewModel.shuffleCurrentWorkout()
+                                        }
+                                    }
+                                )
+                                .padding(.horizontal, 14)
+                                .padding(.top, 10)
+                            }
+
                             if !viewModel.hasLoggedWarmup {
                                 WarmupCardioPrompt(
                                     selectedType: $warmupCardioType,
@@ -99,6 +117,7 @@ struct LiveWorkoutView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
+            .background(Color(.systemGroupedBackground))
             .safeAreaInset(edge: .bottom) {
                 WorkoutNavigationBar(
                     currentIndex: viewModel.currentExerciseIndex,
@@ -213,6 +232,7 @@ struct WorkoutTimerBar: View {
                     .font(.headline)
                     .monospacedDigit()
             }
+            .foregroundColor(.white)
 
             Spacer()
 
@@ -223,11 +243,21 @@ struct WorkoutTimerBar: View {
                         .font(.headline)
                         .monospacedDigit()
                 }
-                .foregroundColor(.orange)
+                .foregroundColor(Color(red: 1.0, green: 0.86, blue: 0.42))
             }
         }
-        .padding()
-        .background(Color(.systemGray6))
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .background(
+            LinearGradient(
+                colors: [
+                    Color(red: 0.11, green: 0.16, blue: 0.23),
+                    Color(red: 0.15, green: 0.25, blue: 0.20)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        )
     }
 }
 
@@ -334,6 +364,83 @@ private struct RestAdjustButton: View {
                 .foregroundColor(.accentColor)
                 .clipShape(RoundedRectangle(cornerRadius: 10))
         }
+    }
+}
+
+private struct WorkoutPlanPreviewCard: View {
+    let exercises: [WorkoutDayPlanExerciseDetail]
+    let canShuffle: Bool
+    let message: String?
+    let onShuffle: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Today's Plan")
+                        .font(.headline)
+                    Text("You can reshuffle this generated plan until the first set is logged.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                Spacer()
+
+                Button(action: onShuffle) {
+                    Label("Shuffle", systemImage: "shuffle")
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .background(Color.accentColor.opacity(0.14), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .disabled(!canShuffle)
+                .opacity(canShuffle ? 1 : 0.5)
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(exercises) { detail in
+                        VStack(alignment: .leading, spacing: 6) {
+                            if detail.planExercise.isAnchor {
+                                Text("Anchor")
+                                    .font(.caption2.weight(.bold))
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 4)
+                                    .background(Color.orange.opacity(0.16), in: Capsule())
+                            }
+
+                            Text(detail.exercise.name)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundColor(.primary)
+                                .lineLimit(2)
+
+                            HStack(spacing: 8) {
+                                if let sets = detail.planExercise.targetSets {
+                                    Label("\(sets)", systemImage: "square.stack.3d.up")
+                                }
+                                if let reps = detail.planExercise.targetReps {
+                                    Label("\(reps)", systemImage: "repeat")
+                                }
+                            }
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        }
+                        .padding(12)
+                        .frame(width: 170, alignment: .leading)
+                        .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    }
+                }
+            }
+
+            if let message {
+                Text(message)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .padding(16)
+        .background(Color(.systemGray6), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
 }
 
@@ -789,8 +896,9 @@ struct WorkoutNavigationBar: View {
         HStack {
             Button(action: onPrevious) {
                 Image(systemName: "chevron.left")
-                    .font(.title2)
-                    .padding()
+                    .font(.title3.weight(.bold))
+                    .frame(width: 44, height: 44)
+                    .background(Color(.systemBackground), in: Circle())
             }
             .disabled(isFirstExercise)
             .opacity(isFirstExercise ? 0.3 : 1)
@@ -808,17 +916,22 @@ struct WorkoutNavigationBar: View {
                 Button(action: onSkip) {
                     Text("Skip")
                         .font(.headline)
-                        .padding()
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 12)
+                        .background(Color(.systemBackground), in: Capsule())
                 }
             } else {
                 Button(action: onNext) {
                     Image(systemName: "chevron.right")
-                        .font(.title2)
-                        .padding()
+                        .font(.title3.weight(.bold))
+                        .frame(width: 44, height: 44)
+                        .background(Color(.systemBackground), in: Circle())
                 }
             }
         }
-        .padding(.horizontal)
-        .background(Color(.systemGray6))
+        .padding(.horizontal, 20)
+        .padding(.top, 12)
+        .padding(.bottom, 10)
+        .background(.ultraThinMaterial)
     }
 }

@@ -48,6 +48,8 @@
 		A10000010038 /* AddCardioView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000020038 /* AddCardioView.swift */; };
 		A10000010039 /* LiveWorkoutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000020039 /* LiveWorkoutView.swift */; };
 		A10000010040 /* SessionSummaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000020040 /* SessionSummaryView.swift */; };
+		A10000010042 /* WorkoutPlanGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000020042 /* WorkoutPlanGenerator.swift */; };
+		A10000010043 /* TodayViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000020043 /* TodayViewModel.swift */; };
 		B2DDF2D32F2B46AE00F3BDD2 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = A10000080001 /* GRDB */; };
 /* End PBXBuildFile section */
 
@@ -93,6 +95,8 @@
 		A10000020038 /* AddCardioView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddCardioView.swift; sourceTree = "<group>"; };
 		A10000020039 /* LiveWorkoutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveWorkoutView.swift; sourceTree = "<group>"; };
 		A10000020040 /* SessionSummaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionSummaryView.swift; sourceTree = "<group>"; };
+		A10000020042 /* WorkoutPlanGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutPlanGenerator.swift; sourceTree = "<group>"; };
+		A10000020043 /* TodayViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayViewModel.swift; sourceTree = "<group>"; };
 		A10000030001 /* WorkoutApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = WorkoutApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -160,6 +164,7 @@
 			children = (
 				A10000020012 /* DatabaseService.swift */,
 				A10000020013 /* NotificationService.swift */,
+				A10000020042 /* WorkoutPlanGenerator.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -182,6 +187,7 @@
 				A10000020019 /* ScheduleViewModel.swift */,
 				A10000020020 /* SettingsViewModel.swift */,
 				A10000020021 /* TemplateViewModel.swift */,
+				A10000020043 /* TodayViewModel.swift */,
 				A10000020022 /* WorkoutViewModel.swift */,
 			);
 			path = ViewModels;
@@ -348,6 +354,7 @@
 				A10000010041 /* WorkoutActivityAttributes.swift in Sources */,
 				A10000010012 /* DatabaseService.swift in Sources */,
 				A10000010013 /* NotificationService.swift in Sources */,
+				A10000010042 /* WorkoutPlanGenerator.swift in Sources */,
 				A10000010014 /* Extensions.swift in Sources */,
 				A10000010015 /* ExerciseViewModel.swift in Sources */,
 				A10000010016 /* HistoryViewModel.swift in Sources */,
@@ -356,6 +363,7 @@
 				A10000010019 /* ScheduleViewModel.swift in Sources */,
 				A10000010020 /* SettingsViewModel.swift in Sources */,
 				A10000010021 /* TemplateViewModel.swift in Sources */,
+				A10000010043 /* TodayViewModel.swift in Sources */,
 				A10000010022 /* WorkoutViewModel.swift in Sources */,
 				A10000010023 /* ExerciseDetailView.swift in Sources */,
 				A10000010024 /* ExerciseFormView.swift in Sources */,

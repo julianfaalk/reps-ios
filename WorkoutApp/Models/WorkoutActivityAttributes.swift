@@ -1,3 +1,4 @@
+#if canImport(ActivityKit)
 import ActivityKit
 import Foundation
 
@@ -7,10 +8,11 @@ struct WorkoutActivityAttributes: ActivityAttributes {
         var isResting: Bool
         var restTimeRemaining: Int
         var currentExercise: String
-        var setProgress: String // e.g. "Set 3/4"
+        var setProgress: String
         var totalSetsCompleted: Int
     }
 
     var templateName: String
     var startedAt: Date
 }
+#endif

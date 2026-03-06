@@ -5,8 +5,12 @@ final class DatabaseService {
     static let shared = DatabaseService()
 
     private var dbQueue: DatabaseQueue!
+    private let useInMemoryDatabase: Bool
+    private let customDatabasePath: String?
 
-    private init() {
+    init(inMemory: Bool = false, databasePath: String? = nil) {
+        self.useInMemoryDatabase = inMemory
+        self.customDatabasePath = databasePath
         do {
             try setupDatabase()
         } catch {
@@ -15,19 +19,28 @@ final class DatabaseService {
     }
 
     private func setupDatabase() throws {
-        let fileManager = FileManager.default
-        let documentsURL = try fileManager.url(
-            for: .documentDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: true
-        )
-        let databaseURL = documentsURL.appendingPathComponent("workout.db")
-
         var configuration = Configuration()
         configuration.foreignKeysEnabled = true
 
-        dbQueue = try DatabaseQueue(path: databaseURL.path, configuration: configuration)
+        if useInMemoryDatabase {
+            dbQueue = try DatabaseQueue(path: ":memory:", configuration: configuration)
+        } else {
+            let databasePath: String
+            if let customDatabasePath {
+                databasePath = customDatabasePath
+            } else {
+                let fileManager = FileManager.default
+                let documentsURL = try fileManager.url(
+                    for: .documentDirectory,
+                    in: .userDomainMask,
+                    appropriateFor: nil,
+                    create: true
+                )
+                databasePath = documentsURL.appendingPathComponent("workout.db").path
+            }
+
+            dbQueue = try DatabaseQueue(path: databasePath, configuration: configuration)
+        }
         try migrator.migrate(dbQueue)
 
         // Ensure templates and schedule are seeded
@@ -358,6 +371,52 @@ final class DatabaseService {
             }
         }
 
+        migrator.registerMigration("v4_workout_plans_and_catalog") { db in
+            try db.alter(table: "exercises") { t in
+                t.add(column: "movement_pattern", .text)
+                t.add(column: "variation_group", .text)
+                t.add(column: "split_tags", .text)
+                t.add(column: "is_compound", .boolean).notNull().defaults(to: false)
+                t.add(column: "is_anchor_candidate", .boolean).notNull().defaults(to: false)
+            }
+
+            try db.create(table: "workout_day_plans") { t in
+                t.column("id", .text).primaryKey()
+                t.column("date", .datetime).notNull()
+                t.column("template_id", .text).notNull()
+                    .references("templates", onDelete: .cascade)
+                t.column("shuffle_count", .integer).notNull().defaults(to: 0)
+                t.column("created_at", .datetime).notNull()
+                t.column("updated_at", .datetime).notNull()
+            }
+
+            try db.execute(sql: """
+                CREATE UNIQUE INDEX idx_workout_day_plans_date_template
+                ON workout_day_plans(date, template_id)
+            """)
+
+            try db.create(table: "workout_day_plan_exercises") { t in
+                t.column("id", .text).primaryKey()
+                t.column("plan_id", .text).notNull()
+                    .references("workout_day_plans", onDelete: .cascade)
+                t.column("exercise_id", .text).notNull()
+                    .references("exercises", onDelete: .cascade)
+                t.column("sort_order", .integer).notNull()
+                t.column("target_sets", .integer)
+                t.column("target_reps", .integer)
+                t.column("target_duration", .integer)
+                t.column("target_weight", .double)
+                t.column("is_anchor", .boolean).notNull().defaults(to: false)
+            }
+
+            try db.alter(table: "workout_sessions") { t in
+                t.add(column: "day_plan_id", .text)
+                    .references("workout_day_plans", onDelete: .setNull)
+            }
+
+            try Self.applyExerciseCatalogMetadataAndInsertions(db: db, now: Date())
+        }
+
         return migrator
     }
 
@@ -510,6 +569,7 @@ final class DatabaseService {
             try Schedule(dayOfWeek: 5, templateId: shouldersTemplate.id, isRestDay: false).insert(db)  // Friday
             try Schedule(dayOfWeek: 6, templateId: nil, isRestDay: true).insert(db)  // Saturday
 
+            try Self.applyExerciseCatalogMetadataAndInsertions(db: db, now: now)
             print("✅ Seeded 27 exercises, 4 templates, and weekly schedule")
         }
     }
@@ -521,6 +581,8 @@ final class DatabaseService {
             // Delete in order respecting foreign key constraints
             try? db.execute(sql: "DELETE FROM session_sets")
             try? db.execute(sql: "DELETE FROM workout_sessions")
+            try? db.execute(sql: "DELETE FROM workout_day_plan_exercises")
+            try? db.execute(sql: "DELETE FROM workout_day_plans")
             try? db.execute(sql: "DELETE FROM schedule")
             try? db.execute(sql: "DELETE FROM template_exercises")
             try? db.execute(sql: "DELETE FROM templates")
@@ -744,34 +806,7 @@ final class DatabaseService {
             guard let session = try WorkoutSession.fetchOne(db, key: id) else {
                 return nil
             }
-
-            var template: WorkoutTemplate? = nil
-            if let templateId = session.templateId {
-                template = try WorkoutTemplate.fetchOne(db, key: templateId)
-            }
-
-            let sets = try SessionSet
-                .filter(SessionSet.Columns.sessionId == id)
-                .order(SessionSet.Columns.completedAt)
-                .fetchAll(db)
-
-            var setsWithExercises: [SessionSetWithExercise] = []
-            for set in sets {
-                if let exercise = try Exercise.fetchOne(db, key: set.exerciseId) {
-                    setsWithExercises.append(SessionSetWithExercise(sessionSet: set, exercise: exercise))
-                }
-            }
-
-            let cardioSessions = try CardioSession
-                .filter(CardioSession.Columns.sessionId == id)
-                .fetchAll(db)
-
-            return SessionWithDetails(
-                session: session,
-                template: template,
-                sets: setsWithExercises,
-                cardioSessions: cardioSessions
-            )
+            return try self.buildSessionWithDetails(session: session, db: db)
         }
     }
 
@@ -795,36 +830,198 @@ final class DatabaseService {
                 .limit(limit)
                 .fetchAll(db)
 
-            var results: [SessionWithDetails] = []
-            for session in sessions {
-                var template: WorkoutTemplate? = nil
-                if let templateId = session.templateId {
-                    template = try WorkoutTemplate.fetchOne(db, key: templateId)
-                }
+            return try sessions.map { try self.buildSessionWithDetails(session: $0, db: db) }
+        }
+    }
 
-                let sets = try SessionSet
-                    .filter(SessionSet.Columns.sessionId == session.id)
-                    .fetchAll(db)
-
-                var setsWithExercises: [SessionSetWithExercise] = []
-                for set in sets {
-                    if let exercise = try Exercise.fetchOne(db, key: set.exerciseId) {
-                        setsWithExercises.append(SessionSetWithExercise(sessionSet: set, exercise: exercise))
-                    }
-                }
-
-                let cardioSessions = try CardioSession
-                    .filter(CardioSession.Columns.sessionId == session.id)
-                    .fetchAll(db)
-
-                results.append(SessionWithDetails(
-                    session: session,
-                    template: template,
-                    sets: setsWithExercises,
-                    cardioSessions: cardioSessions
-                ))
+    func fetchCompletedSessions(on date: Date) throws -> [SessionWithDetails] {
+        try dbQueue.read { db in
+            let start = Calendar.current.startOfDay(for: date)
+            guard let end = Calendar.current.date(byAdding: .day, value: 1, to: start) else {
+                return []
             }
-            return results
+
+            let sessions = try WorkoutSession
+                .filter(WorkoutSession.Columns.completedAt != nil)
+                .filter(WorkoutSession.Columns.startedAt >= start)
+                .filter(WorkoutSession.Columns.startedAt < end)
+                .order(WorkoutSession.Columns.startedAt.desc)
+                .fetchAll(db)
+
+            return try sessions.map { try self.buildSessionWithDetails(session: $0, db: db) }
+        }
+    }
+
+    func fetchWorkoutMonthSummaries(month: Date) throws -> [WorkoutCalendarDaySummary] {
+        try dbQueue.read { db in
+            let calendar = Calendar.current
+            let monthStart = calendar.startOfDay(for: calendar.date(from: calendar.dateComponents([.year, .month], from: month)) ?? month)
+            guard let monthEnd = calendar.date(byAdding: DateComponents(month: 1), to: monthStart) else {
+                return []
+            }
+
+            let rows = try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT DATE(started_at, 'localtime') AS workout_date,
+                           COUNT(*) AS workout_count
+                    FROM workout_sessions
+                    WHERE completed_at IS NOT NULL
+                      AND started_at >= ?
+                      AND started_at < ?
+                    GROUP BY DATE(started_at, 'localtime')
+                    ORDER BY workout_date ASC
+                """,
+                arguments: [monthStart, monthEnd]
+            )
+
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyy-MM-dd"
+            formatter.timeZone = .current
+
+            return rows.compactMap { row in
+                guard let dateString: String = row["workout_date"],
+                      let date = formatter.date(from: dateString) else {
+                    return nil
+                }
+                let workoutCount: Int = row["workout_count"] ?? 0
+                return WorkoutCalendarDaySummary(date: calendar.startOfDay(for: date), workoutCount: workoutCount)
+            }
+        }
+    }
+
+    func fetchWorkoutDayPlan(date: Date, templateId: UUID) throws -> WorkoutDayPlanWithExercises? {
+        try dbQueue.read { db in
+            let normalizedDate = Calendar.current.startOfDay(for: date)
+            guard let plan = try WorkoutDayPlan
+                .filter(WorkoutDayPlan.Columns.date == normalizedDate)
+                .filter(WorkoutDayPlan.Columns.templateId == templateId)
+                .fetchOne(db) else {
+                return nil
+            }
+
+            return try self.buildWorkoutDayPlan(plan: plan, db: db)
+        }
+    }
+
+    func fetchWorkoutDayPlan(id: UUID) throws -> WorkoutDayPlanWithExercises? {
+        try dbQueue.read { db in
+            guard let plan = try WorkoutDayPlan.fetchOne(db, key: id) else {
+                return nil
+            }
+
+            return try self.buildWorkoutDayPlan(plan: plan, db: db)
+        }
+    }
+
+    func saveWorkoutDayPlan(
+        date: Date,
+        template: WorkoutTemplate,
+        exercises: [WorkoutPlanExerciseDraft],
+        shuffleCount: Int,
+        existingPlanId: UUID? = nil
+    ) throws -> WorkoutDayPlanWithExercises {
+        try dbQueue.write { db in
+            let now = Date()
+            let normalizedDate = Calendar.current.startOfDay(for: date)
+            let plan: WorkoutDayPlan
+
+            if let existingPlanId,
+               var existing = try WorkoutDayPlan.fetchOne(db, key: existingPlanId) {
+                existing.date = normalizedDate
+                existing.templateId = template.id
+                existing.shuffleCount = shuffleCount
+                existing.updatedAt = now
+                try existing.save(db)
+                plan = existing
+            } else if var existing = try WorkoutDayPlan
+                .filter(WorkoutDayPlan.Columns.date == normalizedDate)
+                .filter(WorkoutDayPlan.Columns.templateId == template.id)
+                .fetchOne(db) {
+                existing.shuffleCount = shuffleCount
+                existing.updatedAt = now
+                try existing.save(db)
+                plan = existing
+            } else {
+                let created = WorkoutDayPlan(
+                    date: normalizedDate,
+                    templateId: template.id,
+                    shuffleCount: shuffleCount,
+                    createdAt: now,
+                    updatedAt: now
+                )
+                try created.insert(db)
+                plan = created
+            }
+
+            try WorkoutDayPlanExercise
+                .filter(WorkoutDayPlanExercise.Columns.planId == plan.id)
+                .deleteAll(db)
+
+            for draft in exercises.sorted(by: { $0.sortOrder < $1.sortOrder }) {
+                let planExercise = WorkoutDayPlanExercise(
+                    planId: plan.id,
+                    exerciseId: draft.exercise.id,
+                    sortOrder: draft.sortOrder,
+                    targetSets: draft.targetSets,
+                    targetReps: draft.targetReps,
+                    targetDuration: draft.targetDuration,
+                    targetWeight: draft.targetWeight,
+                    isAnchor: draft.isAnchor
+                )
+                try planExercise.insert(db)
+            }
+
+            return try self.buildWorkoutDayPlan(plan: plan, db: db)
+        }
+    }
+
+    func fetchLatestPlanSnapshot(
+        templateId: UUID,
+        excludingPlanId: UUID? = nil,
+        before date: Date? = nil
+    ) throws -> [WorkoutPlanExerciseSnapshot]? {
+        try dbQueue.read { db in
+            var request = WorkoutDayPlan
+                .filter(WorkoutDayPlan.Columns.templateId == templateId)
+
+            if let excludingPlanId {
+                request = request.filter(WorkoutDayPlan.Columns.id != excludingPlanId)
+            }
+            if let date {
+                request = request.filter(WorkoutDayPlan.Columns.date < Calendar.current.startOfDay(for: date))
+            }
+
+            let plan = try request
+                .order(WorkoutDayPlan.Columns.date.desc)
+                .order(WorkoutDayPlan.Columns.updatedAt.desc)
+                .fetchOne(db)
+
+            guard let plan else { return nil }
+            return try self.fetchPlanSnapshots(planId: plan.id, db: db)
+        }
+    }
+
+    func fetchLatestCompletedSessionSnapshot(
+        templateId: UUID,
+        before date: Date? = nil
+    ) throws -> [WorkoutPlanExerciseSnapshot]? {
+        try dbQueue.read { db in
+            var request = WorkoutSession
+                .filter(WorkoutSession.Columns.templateId == templateId)
+                .filter(WorkoutSession.Columns.completedAt != nil)
+
+            if let date {
+                request = request.filter(WorkoutSession.Columns.startedAt < Calendar.current.startOfDay(for: date))
+            }
+
+            guard let session = try request
+                .order(WorkoutSession.Columns.startedAt.desc)
+                .fetchOne(db) else {
+                return nil
+            }
+
+            return try self.fetchSessionSnapshots(sessionId: session.id, db: db)
         }
     }
 
@@ -1269,6 +1466,222 @@ final class DatabaseService {
             csvFiles["measurements.csv"] = measurementCSV
 
             return csvFiles
+        }
+    }
+
+    private func buildSessionWithDetails(session: WorkoutSession, db: Database) throws -> SessionWithDetails {
+        var template: WorkoutTemplate? = nil
+        if let templateId = session.templateId {
+            template = try WorkoutTemplate.fetchOne(db, key: templateId)
+        }
+
+        let sets = try SessionSet
+            .filter(SessionSet.Columns.sessionId == session.id)
+            .order(SessionSet.Columns.completedAt)
+            .fetchAll(db)
+
+        var setsWithExercises: [SessionSetWithExercise] = []
+        for set in sets {
+            if let exercise = try Exercise.fetchOne(db, key: set.exerciseId) {
+                setsWithExercises.append(SessionSetWithExercise(sessionSet: set, exercise: exercise))
+            }
+        }
+
+        let cardioSessions = try CardioSession
+            .filter(CardioSession.Columns.sessionId == session.id)
+            .fetchAll(db)
+
+        return SessionWithDetails(
+            session: session,
+            template: template,
+            sets: setsWithExercises,
+            cardioSessions: cardioSessions
+        )
+    }
+
+    private func buildWorkoutDayPlan(plan: WorkoutDayPlan, db: Database) throws -> WorkoutDayPlanWithExercises {
+        guard let template = try WorkoutTemplate.fetchOne(db, key: plan.templateId) else {
+            throw NSError(
+                domain: "DatabaseService",
+                code: 404,
+                userInfo: [NSLocalizedDescriptionKey: "Missing template for day plan \(plan.id.uuidString)"]
+            )
+        }
+
+        let planExercises = try WorkoutDayPlanExercise
+            .filter(WorkoutDayPlanExercise.Columns.planId == plan.id)
+            .order(WorkoutDayPlanExercise.Columns.sortOrder)
+            .fetchAll(db)
+
+        let details = try planExercises.compactMap { planExercise -> WorkoutDayPlanExerciseDetail? in
+            guard let exercise = try Exercise.fetchOne(db, key: planExercise.exerciseId) else {
+                return nil
+            }
+            return WorkoutDayPlanExerciseDetail(planExercise: planExercise, exercise: exercise)
+        }
+
+        return WorkoutDayPlanWithExercises(plan: plan, template: template, exercises: details)
+    }
+
+    private func fetchPlanSnapshots(planId: UUID, db: Database) throws -> [WorkoutPlanExerciseSnapshot] {
+        let planExercises = try WorkoutDayPlanExercise
+            .filter(WorkoutDayPlanExercise.Columns.planId == planId)
+            .order(WorkoutDayPlanExercise.Columns.sortOrder)
+            .fetchAll(db)
+
+        return try planExercises.compactMap { planExercise in
+            guard let exercise = try Exercise.fetchOne(db, key: planExercise.exerciseId) else {
+                return nil
+            }
+
+            return WorkoutPlanExerciseSnapshot(
+                exercise: exercise,
+                sortOrder: planExercise.sortOrder,
+                isAnchor: planExercise.isAnchor
+            )
+        }
+    }
+
+    private func fetchSessionSnapshots(sessionId: UUID, db: Database) throws -> [WorkoutPlanExerciseSnapshot] {
+        let rows = try Row.fetchAll(
+            db,
+            sql: """
+                SELECT exercise_id,
+                       MIN(completed_at) AS first_completed_at
+                FROM session_sets
+                WHERE session_id = ?
+                GROUP BY exercise_id
+                ORDER BY first_completed_at ASC
+            """,
+            arguments: [sessionId]
+        )
+
+        var snapshots: [WorkoutPlanExerciseSnapshot] = []
+
+        for (index, row) in rows.enumerated() {
+            guard let exerciseId: UUID = row["exercise_id"],
+                  let exercise = try Exercise.fetchOne(db, key: exerciseId) else {
+                continue
+            }
+
+            snapshots.append(
+                WorkoutPlanExerciseSnapshot(
+                    exercise: exercise,
+                    sortOrder: index,
+                    isAnchor: exercise.isAnchorCandidate
+                )
+            )
+        }
+
+        return snapshots
+    }
+
+    private static func applyExerciseCatalogMetadataAndInsertions(db: Database, now: Date) throws {
+        for entry in exerciseCatalogEntries() {
+            if var existing = try Exercise
+                .filter(Exercise.Columns.name == entry.name)
+                .fetchOne(db) {
+                existing.movementPattern = entry.movementPattern
+                existing.variationGroup = entry.variationGroup
+                existing.splitTags = entry.splitTags
+                existing.isCompound = entry.isCompound
+                existing.isAnchorCandidate = entry.isAnchorCandidate
+                existing.updatedAt = now
+                try existing.save(db)
+            } else {
+                try entry.makeExercise(now: now).insert(db)
+            }
+        }
+    }
+
+    private static func exerciseCatalogEntries() -> [ExerciseCatalogEntry] {
+        [
+            ExerciseCatalogEntry(name: "Bankdrücken", muscleGroups: ["Chest", "Triceps", "Front Delts"], equipment: "Barbell", notes: "Flache Bank, kontrolliertes Absenken zur Brust", movementPattern: "horizontal-press", variationGroup: "bench-press", splitTags: ["push"], isCompound: true, isAnchorCandidate: true),
+            ExerciseCatalogEntry(name: "Push-Ups", muscleGroups: ["Chest", "Triceps", "Front Delts"], equipment: "Bodyweight", notes: "Saubere Ganzkörperspannung und volle Range of Motion", movementPattern: "push-up", variationGroup: "push-up", splitTags: ["push"], isCompound: true, isAnchorCandidate: true),
+            ExerciseCatalogEntry(name: "Schrägbank Kurzhanteln", muscleGroups: ["Chest", "Front Delts"], equipment: "Dumbbells", notes: "Schrägbank 30-45 Grad, voller Bewegungsumfang", movementPattern: "incline-press", variationGroup: "incline-dumbbell-press", splitTags: ["push"], isCompound: true, isAnchorCandidate: false),
+            ExerciseCatalogEntry(name: "Incline Barbell Bench Press", muscleGroups: ["Chest", "Front Delts", "Triceps"], equipment: "Barbell", notes: "Leicht steilere Bank, kontrollierter Lockout", movementPattern: "incline-press", variationGroup: "incline-barbell-press", splitTags: ["push"], isCompound: true, isAnchorCandidate: false),
+            ExerciseCatalogEntry(name: "Machine Chest Press", muscleGroups: ["Chest", "Triceps"], equipment: "Machine", notes: "Stabile Brustpresse mit voller Kontraktion", movementPattern: "chest-secondary", variationGroup: "machine-chest-press", splitTags: ["push"], isCompound: true, isAnchorCandidate: false),
+            ExerciseCatalogEntry(name: "Dips", muscleGroups: ["Chest", "Triceps"], equipment: "Dip Station", notes: "Brust-fokussiert: Oberkörper leicht nach vorne lehnen", movementPattern: "chest-secondary", variationGroup: "dips", splitTags: ["push"], isCompound: true, isAnchorCandidate: false),
+            ExerciseCatalogEntry(name: "Cable Flys", muscleGroups: ["Chest"], equipment: "Cable Machine", notes: "Kabelzug, kontrollierte Bewegung, Squeeze am Ende", movementPattern: "chest-isolation", variationGroup: "cable-fly", splitTags: ["push"], isCompound: false, isAnchorCandidate: false),
+            ExerciseCatalogEntry(name: "Pec Deck Fly", muscleGroups: ["Chest"], equipment: "Machine", notes: "Ellbogen leicht gebeugt, Fokus auf Brustkontraktion", movementPattern: "chest-isolation", variationGroup: "pec-deck-fly", splitTags: ["push"], isCompound: false, isAnchorCandidate: false),
+            ExerciseCatalogEntry(name: "Low Cable Fly", muscleGroups: ["Chest"], equipment: "Cable Machine", notes: "Von unten nach oben ziehen, obere Brust ansteuern", movementPattern: "chest-isolation", variationGroup: "low-cable-fly", splitTags: ["push"], isCompound: false, isAnchorCandidate: false),
+            ExerciseCatalogEntry(name: "Trizeps Pushdowns", muscleGroups: ["Triceps"], equipment: "Cable Machine", notes: "Kabelzug mit Seil oder V-Bar", movementPattern: "triceps-extension", variationGroup: "rope-pushdown", splitTags: ["push", "arms"], isCompound: false, isAnchorCandidate: false),
+            ExerciseCatalogEntry(name: "Overhead Trizeps Extension", muscleGroups: ["Triceps"], equipment: "Cable Machine", notes: "Kabelzug oder Kurzhantel über Kopf", movementPattern: "triceps-extension", variationGroup: "overhead-cable-extension", splitTags: ["push", "arms"], isCompound: false, isAnchorCandidate: false),
+            ExerciseCatalogEntry(name: "Skullcrushers", muscleGroups: ["Triceps"], equipment: "Barbell", notes: "SZ-Stange, Ellenbogen fixiert", movementPattern: "triceps-extension", variationGroup: "skullcrusher", splitTags: ["push", "arms", "shoulders"], isCompound: false, isAnchorCandidate: false),
+            ExerciseCatalogEntry(name: "Seitheben", muscleGroups: ["Shoulders"], equipment: "Dumbbells", notes: "Leichtes Gewicht, kontrolliert, 12-15 Reps", movementPattern: "lateral-delt", variationGroup: "lateral-raise", splitTags: ["push", "shoulders"], isCompound: false, isAnchorCandidate: false),
+            ExerciseCatalogEntry(name: "Cable Lateral Raise", muscleGroups: ["Shoulders"], equipment: "Cable Machine", notes: "Einarmig am Kabel, konstante Spannung", movementPattern: "lateral-delt", variationGroup: "cable-lateral-raise", splitTags: ["push", "shoulders"], isCompound: false, isAnchorCandidate: false),
+
+            ExerciseCatalogEntry(name: "Deadlift", muscleGroups: ["Back", "Glutes", "Hamstrings"], equipment: "Barbell", notes: "Konventionelles Kreuzheben vom Boden, neutraler Rücken", movementPattern: "hip-hinge", variationGroup: "deadlift", splitTags: ["pull"], isCompound: true, isAnchorCandidate: true),
+            ExerciseCatalogEntry(name: "Pull-Ups", muscleGroups: ["Back", "Biceps"], equipment: "Pull-Up Bar", notes: "Saubere Wiederholungen, bei Bedarf Zusatzgewicht oder Assist", movementPattern: "vertical-pull", variationGroup: "pull-up", splitTags: ["pull"], isCompound: true, isAnchorCandidate: true),
+            ExerciseCatalogEntry(name: "Klimmzüge / Latzug", muscleGroups: ["Back", "Biceps"], equipment: "Pull-Up Bar", notes: "Klimmzüge oder Latzug als Alternative", movementPattern: "vertical-pull", variationGroup: "lat-pulldown", splitTags: ["pull"], isCompound: true, isAnchorCandidate: false),
+            ExerciseCatalogEntry(name: "Wide-Grip Lat Pulldown", muscleGroups: ["Back", "Biceps"], equipment: "Cable Machine", notes: "Breiter Griff, Schulterblätter nach unten ziehen", movementPattern: "vertical-pull", variationGroup: "wide-lat-pulldown", splitTags: ["pull"], isCompound: true, isAnchorCandidate: false),
+            ExerciseCatalogEntry(name: "Neutral-Grip Lat Pulldown", muscleGroups: ["Back", "Biceps"], equipment: "Cable Machine", notes: "Neutraler Griff für lat-lastige Wiederholungen", movementPattern: "vertical-pull", variationGroup: "neutral-lat-pulldown", splitTags: ["pull"], isCompound: true, isAnchorCandidate: false),
+            ExerciseCatalogEntry(name: "Rudern Langhantel", muscleGroups: ["Back", "Biceps"], equipment: "Barbell", notes: "Vorgebeugtes Rudern, Rücken gerade halten", movementPattern: "horizontal-row", variationGroup: "barbell-row", splitTags: ["pull"], isCompound: true, isAnchorCandidate: false),
+            ExerciseCatalogEntry(name: "Seated Cable Row", muscleGroups: ["Back"], equipment: "Cable Machine", notes: "Enger Griff, Schulterblätter zusammenziehen", movementPattern: "horizontal-row", variationGroup: "seated-cable-row", splitTags: ["pull"], isCompound: true, isAnchorCandidate: false),
+            ExerciseCatalogEntry(name: "Chest-Supported Row", muscleGroups: ["Back", "Biceps"], equipment: "Machine", notes: "Brust liegt auf, Rückenarbeit ohne Schwung", movementPattern: "horizontal-row", variationGroup: "chest-supported-row", splitTags: ["pull"], isCompound: true, isAnchorCandidate: false),
+            ExerciseCatalogEntry(name: "T-Bar Row", muscleGroups: ["Back", "Biceps"], equipment: "Machine", notes: "Neutraler Griff, Ellbogen dicht am Körper", movementPattern: "horizontal-row", variationGroup: "t-bar-row", splitTags: ["pull"], isCompound: true, isAnchorCandidate: false),
+            ExerciseCatalogEntry(name: "Face Pulls", muscleGroups: ["Rear Delts", "Upper Back"], equipment: "Cable Machine", notes: "Seil auf Gesichtshöhe ziehen, hohe Wiederholungen", movementPattern: "upper-back", variationGroup: "face-pull", splitTags: ["pull", "shoulders"], isCompound: false, isAnchorCandidate: false),
+            ExerciseCatalogEntry(name: "Reverse Pec Deck", muscleGroups: ["Rear Delts", "Upper Back"], equipment: "Machine", notes: "Brust anlehnen, Ellbogen leicht gebeugt", movementPattern: "rear-delt", variationGroup: "reverse-pec-deck", splitTags: ["pull", "shoulders"], isCompound: false, isAnchorCandidate: false),
+            ExerciseCatalogEntry(name: "Straight-Arm Pulldown", muscleGroups: ["Back"], equipment: "Cable Machine", notes: "Lat isolieren, Arme fast gestreckt halten", movementPattern: "lat-isolation", variationGroup: "straight-arm-pulldown", splitTags: ["pull"], isCompound: false, isAnchorCandidate: false),
+            ExerciseCatalogEntry(name: "Bizeps Curls Langhantel", muscleGroups: ["Biceps"], equipment: "Barbell", notes: "SZ-Stange oder gerade Stange", movementPattern: "biceps-curl", variationGroup: "barbell-curl", splitTags: ["pull", "arms"], isCompound: false, isAnchorCandidate: false),
+            ExerciseCatalogEntry(name: "Hammer Curls", muscleGroups: ["Biceps", "Forearms"], equipment: "Dumbbells", notes: "Neutraler Griff, Kurzhanteln", movementPattern: "forearm-grip", variationGroup: "hammer-curl", splitTags: ["pull", "arms"], isCompound: false, isAnchorCandidate: false),
+            ExerciseCatalogEntry(name: "Preacher Curl", muscleGroups: ["Biceps"], equipment: "Machine", notes: "Strikter Curl mit fixer Oberarmlage", movementPattern: "biceps-curl", variationGroup: "preacher-curl", splitTags: ["pull", "arms"], isCompound: false, isAnchorCandidate: false),
+            ExerciseCatalogEntry(name: "Incline Dumbbell Curls", muscleGroups: ["Biceps"], equipment: "Dumbbells", notes: "Schrägbank 45 Grad, volle Dehnung", movementPattern: "biceps-curl", variationGroup: "incline-dumbbell-curl", splitTags: ["pull", "arms", "shoulders"], isCompound: false, isAnchorCandidate: false),
+
+            ExerciseCatalogEntry(name: "Kniebeugen", muscleGroups: ["Quadriceps", "Glutes"], equipment: "Barbell", notes: "High Bar oder Low Bar Squat, tiefe Position", movementPattern: "squat", variationGroup: "squat", splitTags: ["legs"], isCompound: true, isAnchorCandidate: true),
+            ExerciseCatalogEntry(name: "Front Squat", muscleGroups: ["Quadriceps", "Core"], equipment: "Barbell", notes: "Aufrechter Torso, Ellbogen hoch halten", movementPattern: "quad-compound", variationGroup: "front-squat", splitTags: ["legs"], isCompound: true, isAnchorCandidate: false),
+            ExerciseCatalogEntry(name: "Rumänisches Kreuzheben", muscleGroups: ["Hamstrings", "Glutes", "Lower Back"], equipment: "Barbell", notes: "Beine leicht gebeugt, Hüfte nach hinten", movementPattern: "hinge-posterior", variationGroup: "romanian-deadlift", splitTags: ["legs"], isCompound: true, isAnchorCandidate: false),
+            ExerciseCatalogEntry(name: "Hip Thrust", muscleGroups: ["Glutes", "Hamstrings"], equipment: "Barbell", notes: "Oben kurz halten, Gesäß maximal anspannen", movementPattern: "hinge-posterior", variationGroup: "hip-thrust", splitTags: ["legs"], isCompound: true, isAnchorCandidate: false),
+            ExerciseCatalogEntry(name: "Beinpresse", muscleGroups: ["Quadriceps", "Glutes"], equipment: "Leg Press", notes: "Fußposition variieren für Fokus", movementPattern: "quad-compound", variationGroup: "leg-press", splitTags: ["legs"], isCompound: true, isAnchorCandidate: false),
+            ExerciseCatalogEntry(name: "Hack Squat", muscleGroups: ["Quadriceps", "Glutes"], equipment: "Machine", notes: "Tiefer Bewegungsradius ohne untere Rückenlast", movementPattern: "quad-compound", variationGroup: "hack-squat", splitTags: ["legs"], isCompound: true, isAnchorCandidate: false),
+            ExerciseCatalogEntry(name: "Walking Lunges", muscleGroups: ["Quadriceps", "Glutes"], equipment: "Dumbbells", notes: "Reps pro Bein, aufrechter Oberkörper", movementPattern: "unilateral-leg", variationGroup: "walking-lunge", splitTags: ["legs"], isCompound: true, isAnchorCandidate: false),
+            ExerciseCatalogEntry(name: "Bulgarian Split Squat", muscleGroups: ["Quadriceps", "Glutes"], equipment: "Dumbbells", notes: "Hinteren Fuß erhöht, volles Absenken", movementPattern: "unilateral-leg", variationGroup: "bulgarian-split-squat", splitTags: ["legs"], isCompound: true, isAnchorCandidate: false),
+            ExerciseCatalogEntry(name: "Step-Ups", muscleGroups: ["Quadriceps", "Glutes"], equipment: "Dumbbells", notes: "Explosiv hochsteigen, kontrolliert absenken", movementPattern: "unilateral-leg", variationGroup: "step-up", splitTags: ["legs"], isCompound: true, isAnchorCandidate: false),
+            ExerciseCatalogEntry(name: "Beinbeuger Maschine", muscleGroups: ["Hamstrings"], equipment: "Machine", notes: "Liegend oder sitzend, kontrolliert", movementPattern: "hamstring-isolation", variationGroup: "leg-curl", splitTags: ["legs"], isCompound: false, isAnchorCandidate: false),
+            ExerciseCatalogEntry(name: "Seated Leg Curl", muscleGroups: ["Hamstrings"], equipment: "Machine", notes: "Sitzende Variante für sauberen Stretch", movementPattern: "hamstring-isolation", variationGroup: "seated-leg-curl", splitTags: ["legs"], isCompound: false, isAnchorCandidate: false),
+            ExerciseCatalogEntry(name: "Wadenheben stehend", muscleGroups: ["Calves"], equipment: "Machine", notes: "Voller Bewegungsumfang, Pause unten", movementPattern: "calves", variationGroup: "standing-calf-raise", splitTags: ["legs"], isCompound: false, isAnchorCandidate: false),
+            ExerciseCatalogEntry(name: "Seated Calf Raise", muscleGroups: ["Calves"], equipment: "Machine", notes: "Bewusst langsam, oben kurz halten", movementPattern: "calves", variationGroup: "seated-calf-raise", splitTags: ["legs"], isCompound: false, isAnchorCandidate: false),
+
+            ExerciseCatalogEntry(name: "Overhead Press", muscleGroups: ["Shoulders", "Triceps"], equipment: "Barbell", notes: "Stehend drücken, Core fest halten", movementPattern: "vertical-press", variationGroup: "overhead-press", splitTags: ["shoulders"], isCompound: true, isAnchorCandidate: true),
+            ExerciseCatalogEntry(name: "Schulterdrücken Kurzhantel", muscleGroups: ["Shoulders", "Triceps"], equipment: "Dumbbells", notes: "Sitzend oder stehend, Kurzhanteln", movementPattern: "vertical-press", variationGroup: "dumbbell-shoulder-press", splitTags: ["shoulders"], isCompound: true, isAnchorCandidate: false),
+            ExerciseCatalogEntry(name: "Arnold Press", muscleGroups: ["Shoulders", "Triceps"], equipment: "Dumbbells", notes: "Rotation kontrolliert und ohne Schwung", movementPattern: "vertical-press", variationGroup: "arnold-press", splitTags: ["shoulders"], isCompound: true, isAnchorCandidate: false),
+            ExerciseCatalogEntry(name: "Reverse Flys", muscleGroups: ["Rear Delts"], equipment: "Dumbbells", notes: "Vorgebeugt oder am Kabelzug", movementPattern: "rear-delt", variationGroup: "reverse-fly", splitTags: ["shoulders", "pull"], isCompound: false, isAnchorCandidate: false),
+            ExerciseCatalogEntry(name: "Barbell Curls", muscleGroups: ["Biceps"], equipment: "Barbell", notes: "SZ-Stange, strikter Form", movementPattern: "biceps-curl", variationGroup: "barbell-curl", splitTags: ["arms", "shoulders"], isCompound: false, isAnchorCandidate: false),
+            ExerciseCatalogEntry(name: "Cable Kickbacks", muscleGroups: ["Triceps"], equipment: "Cable Machine", notes: "Kabelzug, ein Arm, volle Extension", movementPattern: "arm-secondary", variationGroup: "cable-kickback", splitTags: ["arms", "shoulders"], isCompound: false, isAnchorCandidate: false),
+            ExerciseCatalogEntry(name: "Rope Hammer Curl", muscleGroups: ["Biceps", "Forearms"], equipment: "Cable Machine", notes: "Seilgriff am Kabel, neutraler Curl", movementPattern: "forearm-grip", variationGroup: "rope-hammer-curl", splitTags: ["arms", "shoulders"], isCompound: false, isAnchorCandidate: false),
+            ExerciseCatalogEntry(name: "Hanging Leg Raises", muscleGroups: ["Core"], equipment: "Pull-Up Bar", notes: "Beine gestreckt oder angewinkelt", movementPattern: "core-flexion", variationGroup: "hanging-leg-raise", splitTags: ["core", "shoulders"], isCompound: false, isAnchorCandidate: true),
+            ExerciseCatalogEntry(name: "Cable Crunches", muscleGroups: ["Core"], equipment: "Cable Machine", notes: "Kabelzug, kniend, Crunches nach unten", movementPattern: "core-flexion", variationGroup: "cable-crunch", splitTags: ["core", "shoulders"], isCompound: false, isAnchorCandidate: false),
+            ExerciseCatalogEntry(name: "Ab Wheel Rollout", muscleGroups: ["Core"], equipment: "Ab Wheel", notes: "Spannung halten, nur so weit rollen wie kontrollierbar", movementPattern: "core-stability", variationGroup: "ab-wheel", splitTags: ["core", "shoulders"], isCompound: false, isAnchorCandidate: false),
+            ExerciseCatalogEntry(name: "Pallof Press", muscleGroups: ["Core"], equipment: "Cable Machine", notes: "Antirotation mit sauberer Körperspannung", movementPattern: "core-stability", variationGroup: "pallof-press", splitTags: ["core", "shoulders"], isCompound: false, isAnchorCandidate: false)
+        ]
+    }
+
+    private struct ExerciseCatalogEntry {
+        var name: String
+        var muscleGroups: [String]
+        var equipment: String
+        var notes: String
+        var movementPattern: String
+        var variationGroup: String
+        var splitTags: [String]
+        var isCompound: Bool
+        var isAnchorCandidate: Bool
+
+        func makeExercise(now: Date) -> Exercise {
+            Exercise(
+                name: name,
+                exerciseType: .reps,
+                muscleGroups: muscleGroups,
+                equipment: equipment,
+                notes: notes,
+                movementPattern: movementPattern,
+                variationGroup: variationGroup,
+                splitTags: splitTags,
+                isCompound: isCompound,
+                isAnchorCandidate: isAnchorCandidate,
+                createdAt: now,
+                updatedAt: now
+            )
         }
     }
 }

@@ -35,6 +35,11 @@ struct Exercise: Identifiable, Codable, Hashable {
     var muscleGroups: [String]
     var equipment: String?
     var notes: String?
+    var movementPattern: String?
+    var variationGroup: String?
+    var splitTags: [String]
+    var isCompound: Bool
+    var isAnchorCandidate: Bool
     var createdAt: Date
     var updatedAt: Date
 
@@ -45,6 +50,11 @@ struct Exercise: Identifiable, Codable, Hashable {
         muscleGroups: [String] = [],
         equipment: String? = nil,
         notes: String? = nil,
+        movementPattern: String? = nil,
+        variationGroup: String? = nil,
+        splitTags: [String] = [],
+        isCompound: Bool = false,
+        isAnchorCandidate: Bool = false,
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
@@ -54,6 +64,11 @@ struct Exercise: Identifiable, Codable, Hashable {
         self.muscleGroups = muscleGroups
         self.equipment = equipment
         self.notes = notes
+        self.movementPattern = movementPattern
+        self.variationGroup = variationGroup
+        self.splitTags = splitTags
+        self.isCompound = isCompound
+        self.isAnchorCandidate = isAnchorCandidate
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -65,7 +80,13 @@ extension Exercise: FetchableRecord, PersistableRecord {
 
     enum Columns: String, ColumnExpression {
         case id, name, exerciseType = "exercise_type", muscleGroups = "muscle_groups"
-        case equipment, notes, createdAt = "created_at", updatedAt = "updated_at"
+        case equipment, notes
+        case movementPattern = "movement_pattern"
+        case variationGroup = "variation_group"
+        case splitTags = "split_tags"
+        case isCompound = "is_compound"
+        case isAnchorCandidate = "is_anchor_candidate"
+        case createdAt = "created_at", updatedAt = "updated_at"
     }
 
     init(row: Row) throws {
@@ -86,6 +107,20 @@ extension Exercise: FetchableRecord, PersistableRecord {
 
         equipment = row[Columns.equipment]
         notes = row[Columns.notes]
+        movementPattern = row[Columns.movementPattern]
+        variationGroup = row[Columns.variationGroup]
+        if let splitTagsJson: String = row[Columns.splitTags] {
+            if let data = splitTagsJson.data(using: .utf8),
+               let decoded = try? JSONDecoder().decode([String].self, from: data) {
+                splitTags = decoded
+            } else {
+                splitTags = []
+            }
+        } else {
+            splitTags = []
+        }
+        isCompound = row[Columns.isCompound] ?? false
+        isAnchorCandidate = row[Columns.isAnchorCandidate] ?? false
         createdAt = try row[Columns.createdAt]
         updatedAt = try row[Columns.updatedAt]
     }
@@ -102,6 +137,14 @@ extension Exercise: FetchableRecord, PersistableRecord {
 
         container[Columns.equipment] = equipment
         container[Columns.notes] = notes
+        container[Columns.movementPattern] = movementPattern
+        container[Columns.variationGroup] = variationGroup
+        if let data = try? JSONEncoder().encode(splitTags),
+           let json = String(data: data, encoding: .utf8) {
+            container[Columns.splitTags] = json
+        }
+        container[Columns.isCompound] = isCompound
+        container[Columns.isAnchorCandidate] = isAnchorCandidate
         container[Columns.createdAt] = createdAt
         container[Columns.updatedAt] = updatedAt
     }
