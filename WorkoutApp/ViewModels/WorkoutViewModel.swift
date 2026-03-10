@@ -441,14 +441,22 @@ class WorkoutViewModel: ObservableObject {
                 }
             }
 
-            // Start rest timer
-            startRestTimer()
+            let completedForCurrentExercise = completedSetsForCurrentExercise.count
+            let hasMetTargetSets = current.templateExercise.targetSets.map {
+                completedForCurrentExercise >= $0
+            } ?? false
+            let finishedWorkout = hasMetTargetSets && isLastExercise
 
-            // Auto-advance if all target sets are done
-            if let targetSets = current.templateExercise.targetSets,
-               completedSetsForCurrentExercise.count >= targetSets,
-               !isLastExercise {
-                // Don't auto-advance, let user decide
+            if !finishedWorkout {
+                startRestTimer()
+            } else {
+                stopRestTimer()
+            }
+
+            if hasMetTargetSets && !isLastExercise {
+                nextExercise()
+            } else {
+                updateLiveActivity()
             }
         } catch {
             errorMessage = error.localizedDescription

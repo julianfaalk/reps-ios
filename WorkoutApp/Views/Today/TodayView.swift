@@ -1,5 +1,13 @@
 import SwiftUI
 
+private enum TodaySpacing {
+    static let xxs: CGFloat = 4
+    static let xs: CGFloat = 8
+    static let sm: CGFloat = 12
+    static let md: CGFloat = 16
+    static let lg: CGFloat = 24
+}
+
 struct TodayView: View {
     @StateObject private var viewModel = TodayViewModel()
     @EnvironmentObject var workoutViewModel: WorkoutViewModel
@@ -8,21 +16,27 @@ struct TodayView: View {
     @State private var showingWorkout = false
     @State private var showingWorkoutOverview = false
     @State private var selectedHistoryDate: Date?
+    @State private var shuffleMessage: String?
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 20) {
+                VStack(alignment: .leading, spacing: TodaySpacing.lg) {
                     TodayHeroCard(
                         schedule: viewModel.todaySchedule,
                         dayPlan: viewModel.todayPlan,
                         shuffleUnavailableReason: viewModel.todayShuffleUnavailableReason,
-                        onStartWorkout: startTodayWorkout,
+                        shuffleMessage: shuffleMessage,
+                        hasActiveWorkout: workoutViewModel.isWorkoutActive,
+                        activeExerciseName: workoutViewModel.currentExercise?.exercise.name,
+                        onPrimaryAction: startTodayWorkout,
                         onShuffle: shuffleTodayPlan,
                         onSelectTemplate: { showingTemplateList = true }
                     )
 
                     TodayQuickActionsSection(
+                        isWorkoutActive: workoutViewModel.isWorkoutActive,
+                        onResumeWorkout: { showingWorkout = workoutViewModel.isWorkoutActive },
                         onStartEmpty: {
                             Task {
                                 await workoutViewModel.startAdHocSession()
@@ -52,13 +66,22 @@ struct TodayView: View {
                     )
                 }
                 .padding(.horizontal, 16)
-                .padding(.top, 12)
+                .padding(.top, 16)
                 .padding(.bottom, 24)
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("Today")
+            .navigationBarTitleDisplayMode(.large)
             .refreshable {
                 await viewModel.refresh()
+            }
+            .onChange(of: workoutViewModel.isWorkoutActive) { _, isActive in
+                if !isActive {
+                    showingWorkout = false
+                    Task {
+                        await viewModel.refresh()
+                    }
+                }
             }
             .sheet(isPresented: $showingTemplateList) {
                 TemplatePickerView { template in
@@ -81,21 +104,26 @@ struct TodayView: View {
             .sheet(isPresented: $showingWorkoutOverview) {
                 HistoryView()
             }
-            .fullScreenCover(
-                isPresented: $showingWorkout,
-                onDismiss: {
-                    Task {
-                        await viewModel.refresh()
-                    }
-                }
-            ) {
+            .navigationDestination(isPresented: $showingWorkout) {
                 LiveWorkoutView()
                     .environmentObject(workoutViewModel)
+                    .onDisappear {
+                        if !workoutViewModel.isWorkoutActive {
+                            Task {
+                                await viewModel.refresh()
+                            }
+                        }
+                    }
             }
         }
     }
 
     private func startTodayWorkout() {
+        if workoutViewModel.isWorkoutActive {
+            showingWorkout = true
+            return
+        }
+
         guard let dayPlan = viewModel.todayPlan else {
             showingTemplateList = true
             return
@@ -109,7 +137,7 @@ struct TodayView: View {
 
     private func shuffleTodayPlan() {
         Task {
-            _ = await viewModel.shuffleTodayPlan()
+            shuffleMessage = await viewModel.shuffleTodayPlan()
         }
     }
 }
@@ -118,69 +146,81 @@ private struct TodayHeroCard: View {
     let schedule: ScheduleDay?
     let dayPlan: WorkoutDayPlanWithExercises?
     let shuffleUnavailableReason: String?
-    let onStartWorkout: () -> Void
+    let shuffleMessage: String?
+    let hasActiveWorkout: Bool
+    let activeExerciseName: String?
+    let onPrimaryAction: () -> Void
     let onShuffle: () -> Void
     let onSelectTemplate: () -> Void
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
-            RoundedRectangle(cornerRadius: 28, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Color(red: 0.10, green: 0.18, blue: 0.27),
-                            Color(red: 0.16, green: 0.32, blue: 0.24),
-                            Color(red: 0.23, green: 0.48, blue: 0.28)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
+        VStack(alignment: .leading, spacing: TodaySpacing.md) {
+            HStack(alignment: .top, spacing: TodaySpacing.sm) {
+                VStack(alignment: .leading, spacing: TodaySpacing.xs) {
+                    Text(Date(), format: .dateTime.weekday(.wide).day().month(.wide))
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.72))
 
-            VStack(alignment: .leading, spacing: 18) {
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(Date(), format: .dateTime.weekday(.wide).day().month(.wide))
-                            .font(.subheadline.weight(.medium))
+                    Text(titleText)
+                        .font(.system(size: 32, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+
+                    Text(subtitleText)
+                        .font(.callout)
+                        .foregroundStyle(.white.opacity(0.78))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 0)
+
+                VStack(alignment: .trailing, spacing: TodaySpacing.xs) {
+                    TodayHeroStatusPill(title: statusTitle, icon: iconName)
+
+                    if let dayPlan {
+                        Text("\(dayPlan.exercises.count) exercises")
+                            .font(.caption.weight(.semibold))
                             .foregroundStyle(.white.opacity(0.72))
-
-                        Text(titleText)
-                            .font(.system(size: 28, weight: .bold, design: .rounded))
-                            .foregroundStyle(.white)
-                    }
-
-                    Spacer()
-
-                    Image(systemName: iconName)
-                        .font(.system(size: 30, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.92))
-                        .padding(12)
-                        .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                }
-
-                Text(subtitleText)
-                    .font(.callout)
-                    .foregroundStyle(.white.opacity(0.78))
-
-                if let dayPlan, !dayPlan.exercises.isEmpty {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
-                            ForEach(dayPlan.exercises) { detail in
-                                PlanExerciseChip(detail: detail)
-                            }
-                        }
-                        .padding(.vertical, 2)
                     }
                 }
-
-                actionArea
             }
-            .padding(22)
+
+            if let dayPlan, !dayPlan.exercises.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: TodaySpacing.xs) {
+                        ForEach(dayPlan.exercises) { detail in
+                            PlanExerciseChip(
+                                detail: detail,
+                                isCurrent: detail.exercise.name == activeExerciseName
+                            )
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+
+            actionArea
         }
-        .shadow(color: Color.black.opacity(0.14), radius: 18, y: 10)
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            LinearGradient(
+                colors: [
+                    Color(red: 0.10, green: 0.18, blue: 0.27),
+                    Color(red: 0.16, green: 0.30, blue: 0.24),
+                    Color(red: 0.23, green: 0.44, blue: 0.28)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ),
+            in: RoundedRectangle(cornerRadius: 28, style: .continuous)
+        )
+        .shadow(color: Color.black.opacity(0.10), radius: 18, y: 8)
     }
 
     private var titleText: String {
+        if hasActiveWorkout {
+            return dayPlan?.template.name ?? "Workout in Progress"
+        }
         if schedule?.isRestDay == true {
             return "Recovery Day"
         }
@@ -194,6 +234,12 @@ private struct TodayHeroCard: View {
     }
 
     private var subtitleText: String {
+        if hasActiveWorkout {
+            if let activeExerciseName {
+                return "Resume where you left off. Current exercise: \(activeExerciseName)."
+            }
+            return "Resume your current workout without losing set progress."
+        }
         if schedule?.isRestDay == true {
             return "Keep the streak alive tomorrow. Mobility, steps, and recovery count."
         }
@@ -208,15 +254,37 @@ private struct TodayHeroCard: View {
     }
 
     private var iconName: String {
+        if hasActiveWorkout {
+            return "timer"
+        }
         if schedule?.isRestDay == true {
             return "moon.zzz.fill"
         }
         return dayPlan == nil ? "calendar.badge.plus" : "figure.strengthtraining.traditional"
     }
 
+    private var statusTitle: String {
+        if hasActiveWorkout {
+            return "Active"
+        }
+        if schedule?.isRestDay == true {
+            return "Rest"
+        }
+        return dayPlan == nil ? "Open" : "Ready"
+    }
+
     @ViewBuilder
     private var actionArea: some View {
-        if schedule?.isRestDay == true {
+        if hasActiveWorkout {
+            Button(action: onPrimaryAction) {
+                Label("Resume Workout", systemImage: "play.fill")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(Color.white, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .foregroundStyle(Color.black.opacity(0.84))
+            }
+        } else if schedule?.isRestDay == true {
             Button(action: onSelectTemplate) {
                 Label("Train Anyway", systemImage: "plus.circle.fill")
                     .font(.headline)
@@ -236,7 +304,7 @@ private struct TodayHeroCard: View {
             }
         } else {
             HStack(spacing: 12) {
-                Button(action: onStartWorkout) {
+                Button(action: onPrimaryAction) {
                     Label("Start Workout", systemImage: "play.fill")
                         .font(.headline)
                         .frame(maxWidth: .infinity)
@@ -257,8 +325,8 @@ private struct TodayHeroCard: View {
                 .opacity(dayPlan == nil || shuffleUnavailableReason != nil ? 0.45 : 1)
             }
 
-            if let shuffleUnavailableReason, dayPlan != nil {
-                Text(shuffleUnavailableReason)
+            if let statusMessage = shuffleMessage ?? shuffleUnavailableReason, dayPlan != nil {
+                Text(statusMessage)
                     .font(.caption)
                     .foregroundStyle(.white.opacity(0.72))
             }
@@ -266,8 +334,23 @@ private struct TodayHeroCard: View {
     }
 }
 
+private struct TodayHeroStatusPill: View {
+    let title: String
+    let icon: String
+
+    var body: some View {
+        Label(title, systemImage: icon)
+            .font(.caption.weight(.bold))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(.white.opacity(0.14), in: Capsule())
+            .foregroundStyle(.white.opacity(0.92))
+    }
+}
+
 private struct PlanExerciseChip: View {
     let detail: WorkoutDayPlanExerciseDetail
+    let isCurrent: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -293,30 +376,44 @@ private struct PlanExerciseChip: View {
                 }
             }
             .font(.caption)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(isCurrent ? .white.opacity(0.86) : .white.opacity(0.72))
         }
         .padding(12)
-        .frame(width: 170, alignment: .leading)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .frame(width: 168, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(isCurrent ? .white.opacity(0.22) : .white.opacity(0.12))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(isCurrent ? .white.opacity(0.30) : .clear, lineWidth: 1)
+        )
+        .foregroundStyle(.white)
     }
 }
 
 private struct TodayQuickActionsSection: View {
+    let isWorkoutActive: Bool
+    let onResumeWorkout: () -> Void
     let onStartEmpty: () -> Void
     let onSelectTemplate: () -> Void
     let onOpenHistory: () -> Void
 
-    private let columns = [GridItem(.adaptive(minimum: 108), spacing: 12)]
+    private let columns = [GridItem(.adaptive(minimum: 108), spacing: TodaySpacing.sm)]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Quick Actions")
-                .font(.headline)
+                .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.secondary)
 
             LazyVGrid(columns: columns, spacing: 12) {
-                QuickActionTile(title: "Empty Session", icon: "plus.circle.fill", tint: Color.green, action: onStartEmpty)
-                QuickActionTile(title: "Choose Template", icon: "rectangle.grid.2x2.fill", tint: Color.blue, action: onSelectTemplate)
+                if isWorkoutActive {
+                    QuickActionTile(title: "Resume", icon: "play.circle.fill", tint: Color.green, action: onResumeWorkout)
+                } else {
+                    QuickActionTile(title: "Empty Session", icon: "plus.circle.fill", tint: Color.green, action: onStartEmpty)
+                    QuickActionTile(title: "Choose Template", icon: "rectangle.grid.2x2.fill", tint: Color.blue, action: onSelectTemplate)
+                }
                 QuickActionTile(title: "History", icon: "clock.arrow.circlepath", tint: Color.orange, action: onOpenHistory)
             }
         }
@@ -333,12 +430,12 @@ private struct QuickActionTile: View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 10) {
                 Image(systemName: icon)
-                    .font(.title2.weight(.semibold))
+                    .font(.title3.weight(.semibold))
                 Text(title)
                     .font(.subheadline.weight(.semibold))
                     .multilineTextAlignment(.leading)
             }
-            .frame(maxWidth: .infinity, minHeight: 96, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: 88, alignment: .leading)
             .padding(16)
             .background(
                 RoundedRectangle(cornerRadius: 22, style: .continuous)
@@ -363,14 +460,17 @@ private struct WorkoutCalendarSection: View {
     let onOpenDay: (CalendarMonthDay) -> Void
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 7)
+    private var completedDays: Int {
+        days.filter { $0.summary != nil && $0.isInDisplayedMonth }.count
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Workout Calendar")
+                VStack(alignment: .leading, spacing: TodaySpacing.xxs) {
+                    Text("Calendar")
                         .font(.title3.weight(.bold))
-                    Text("Tap any 🔥 day to open that workout history.")
+                    Text("\(completedDays) active days this month")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -400,6 +500,10 @@ private struct WorkoutCalendarSection: View {
                     }
                 }
             }
+
+            Text("Tap any day with activity to open the workout history.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
         .padding(18)
         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 28, style: .continuous))
@@ -414,7 +518,7 @@ private struct CalendarNavButton: View {
         Button(action: action) {
             Image(systemName: icon)
                 .font(.subheadline.weight(.bold))
-                .frame(width: 34, height: 34)
+                .frame(width: 32, height: 32)
                 .background(Color(.systemBackground), in: Circle())
         }
         .buttonStyle(.plain)
@@ -427,7 +531,7 @@ private struct CalendarDayCell: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: TodaySpacing.xs) {
                 Text("\(Calendar.current.component(.day, from: day.date))")
                     .font(.subheadline.weight(day.isToday ? .bold : .medium))
                     .foregroundStyle(textColor)
@@ -437,6 +541,7 @@ private struct CalendarDayCell: View {
                 if let summary = day.summary {
                     HStack(spacing: 4) {
                         Text("🔥")
+                            .font(.caption)
                         if summary.workoutCount > 1 {
                             Text("\(summary.workoutCount)")
                                 .font(.caption2.weight(.bold))
@@ -446,7 +551,7 @@ private struct CalendarDayCell: View {
                 }
             }
             .padding(10)
-            .frame(maxWidth: .infinity, minHeight: 72, alignment: .topLeading)
+            .frame(maxWidth: .infinity, minHeight: 58, alignment: .topLeading)
             .background(backgroundColor, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -462,7 +567,7 @@ private struct CalendarDayCell: View {
             return Color.accentColor.opacity(0.12)
         }
         if day.summary != nil {
-            return Color.orange.opacity(0.12)
+            return Color.orange.opacity(0.10)
         }
         return day.isInDisplayedMonth ? Color(.systemBackground) : Color(.systemGray6)
     }
