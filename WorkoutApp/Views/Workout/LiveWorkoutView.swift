@@ -58,16 +58,19 @@ struct LiveWorkoutView: View {
                         totalExercises: viewModel.templateExercises.count,
                         isLastExercise: viewModel.isLastExercise,
                         warmupCardioType: $warmupCardioType,
-                        showWarmupPrompt: !viewModel.hasLoggedWarmup,
-                        isLoggingEnabled: viewModel.hasLoggedWarmup,
-                        loggingHint: viewModel.hasLoggedWarmup
+                        showWarmupPrompt: !viewModel.hasSatisfiedWarmupRequirement,
+                        isLoggingEnabled: viewModel.hasSatisfiedWarmupRequirement,
+                        loggingHint: viewModel.hasSatisfiedWarmupRequirement
                             ? nil
-                            : "Log the 10-minute warm-up to unlock set tracking.",
-                        onAddWarmup: {
-                            Task {
-                                await viewModel.addWarmupCardio(type: warmupCardioType)
-                            }
-                        },
+                            : viewModel.isWarmupTimerActive
+                            ? "Finish or skip the 10-minute warm-up to unlock set tracking."
+                            : "Start the 10-minute warm-up or skip it to unlock set tracking.",
+                        isWarmupTimerActive: viewModel.isWarmupTimerActive,
+                        warmupTimeRemaining: viewModel.warmupTimeRemaining,
+                        warmupTimerTotalTime: viewModel.warmupTimerTotalTime,
+                        formattedWarmupTime: viewModel.formattedWarmupTime,
+                        onStartWarmup: { viewModel.startWarmupTimer(type: warmupCardioType) },
+                        onSkipWarmup: { viewModel.skipWarmup() },
                         onLogSet: { reps, duration, weight in
                             viewModel.setLastEnteredValues(
                                 for: currentExercise.exercise.id,
@@ -370,33 +373,91 @@ private struct RestAdjustButton: View {
 private struct WarmupEntryPanel: View {
     @Binding var selectedType: CardioType
     @Binding var isExpanded: Bool
-    let onAddWarmup: () -> Void
+    let isTimerActive: Bool
+    let timeRemaining: Int
+    let totalTime: Int
+    let formattedTime: String
+    let onStartWarmup: () -> Void
+    let onSkipWarmup: () -> Void
+
+    private var progress: Double {
+        guard totalTime > 0 else { return 0 }
+        return 1 - (Double(timeRemaining) / Double(totalTime))
+    }
 
     var body: some View {
         DisclosureGroup(isExpanded: $isExpanded) {
             VStack(alignment: .leading, spacing: WorkoutSpacing.sm) {
-                Text("Start with 10 minutes of light cardio to unlock set logging.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if isTimerActive {
+                    VStack(alignment: .leading, spacing: WorkoutSpacing.sm) {
+                        HStack(alignment: .center, spacing: WorkoutSpacing.md) {
+                            VStack(alignment: .leading, spacing: WorkoutSpacing.xxs) {
+                                Text("Warm-up running")
+                                    .font(.subheadline.weight(.semibold))
 
-                Picker("Warm-up type", selection: $selectedType) {
-                    ForEach(CardioType.allCases, id: \.self) { type in
-                        Text(type.displayName).tag(type)
+                                Text(formattedTime)
+                                    .font(.system(size: 34, weight: .bold, design: .rounded))
+                                    .monospacedDigit()
+                                    .contentTransition(.numericText())
+                            }
+
+                            Spacer()
+
+                            Image(systemName: "timer")
+                                .font(.system(size: 24, weight: .semibold))
+                                .foregroundStyle(.orange)
+                                .frame(width: 52, height: 52)
+                                .background(Color.orange.opacity(0.12), in: Circle())
+                        }
+
+                        ProgressView(value: progress)
+                            .tint(.orange)
+
+                        Text("Set logging unlocks automatically when the 10-minute warm-up ends.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Button(action: onSkipWarmup) {
+                            Label("Skip Warm-up", systemImage: "forward.fill")
+                                .font(.subheadline.weight(.semibold))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                                .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                .foregroundStyle(.primary)
+                        }
                     }
-                }
-                .pickerStyle(.menu)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                } else {
+                    Text("Start with 10 minutes of light cardio to unlock set logging.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
 
-                Button(action: onAddWarmup) {
-                    Label("Log 10-min Warm-up", systemImage: "figure.run")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .background(Color.orange, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                        .foregroundStyle(.white)
+                    Picker("Warm-up type", selection: $selectedType) {
+                        ForEach(CardioType.allCases, id: \.self) { type in
+                            Text(type.displayName).tag(type)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+                    Button(action: onStartWarmup) {
+                        Label("Start 10-min Warm-up", systemImage: "figure.run")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .background(Color.orange, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .foregroundStyle(.white)
+                    }
+
+                    Button(action: onSkipWarmup) {
+                        Text("Skip for now")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    }
                 }
             }
             .padding(.top, WorkoutSpacing.sm)
@@ -405,12 +466,22 @@ private struct WarmupEntryPanel: View {
                 Label("10-min Warm-up", systemImage: "figure.run")
                     .font(.headline)
                 Spacer()
-                Text("Required")
-                    .font(.caption.weight(.bold))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 6)
-                    .background(Color.orange.opacity(0.12), in: Capsule())
-                    .foregroundStyle(.orange)
+                if isTimerActive {
+                    Text(formattedTime)
+                        .font(.caption.weight(.bold))
+                        .monospacedDigit()
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                        .background(Color.orange.opacity(0.12), in: Capsule())
+                        .foregroundStyle(.orange)
+                } else {
+                    Text("Required")
+                        .font(.caption.weight(.bold))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                        .background(Color.orange.opacity(0.12), in: Capsule())
+                        .foregroundStyle(.orange)
+                }
             }
         }
         .padding(WorkoutSpacing.md)
@@ -429,7 +500,12 @@ private struct ExerciseLoggerView: View {
     let showWarmupPrompt: Bool
     let isLoggingEnabled: Bool
     let loggingHint: String?
-    let onAddWarmup: () -> Void
+    let isWarmupTimerActive: Bool
+    let warmupTimeRemaining: Int
+    let warmupTimerTotalTime: Int
+    let formattedWarmupTime: String
+    let onStartWarmup: () -> Void
+    let onSkipWarmup: () -> Void
     let onLogSet: (Int?, Int?, Double?) -> Void
     let onDeleteSet: (SessionSet) -> Void
     let onPrevious: () -> Void
@@ -505,7 +581,12 @@ private struct ExerciseLoggerView: View {
                     WarmupEntryPanel(
                         selectedType: $warmupCardioType,
                         isExpanded: $warmupExpanded,
-                        onAddWarmup: onAddWarmup
+                        isTimerActive: isWarmupTimerActive,
+                        timeRemaining: warmupTimeRemaining,
+                        totalTime: warmupTimerTotalTime,
+                        formattedTime: formattedWarmupTime,
+                        onStartWarmup: onStartWarmup,
+                        onSkipWarmup: onSkipWarmup
                     )
                 }
 

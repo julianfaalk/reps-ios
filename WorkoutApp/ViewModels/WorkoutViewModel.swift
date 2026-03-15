@@ -21,6 +21,9 @@ class WorkoutViewModel: ObservableObject {
     @Published var restTimeRemaining: Int = 0
     @Published var restTimerTotalTime: Int = 0
     @Published var isRestTimerActive: Bool = false
+    @Published var warmupTimeRemaining: Int = 0
+    @Published var warmupTimerTotalTime: Int = 0
+    @Published var isWarmupTimerActive: Bool = false
     @Published var isWorkoutActive: Bool = false
 
     @Published var sessionNotes: String = ""
@@ -35,6 +38,7 @@ class WorkoutViewModel: ObservableObject {
     private let planGenerator = WorkoutPlanGenerator()
     private var workoutTimer: Timer?
     private var restTimer: Timer?
+    private var warmupTimer: Timer?
     private var defaultRestTime: Int = 90
 #if canImport(ActivityKit)
     private var currentActivity: Activity<WorkoutActivityAttributes>?
@@ -43,11 +47,18 @@ class WorkoutViewModel: ObservableObject {
     private let warmupCardioTag = "[warmup]"
     private let sessionExerciseCachePrefix = "workout.session.exercises."
     private let sessionIndexCachePrefix = "workout.session.index."
+    private let sessionWarmupSkipCachePrefix = "workout.session.warmup.skip."
+    private let sessionWarmupEndCachePrefix = "workout.session.warmup.end."
+    private let sessionWarmupTotalCachePrefix = "workout.session.warmup.total."
+    private let sessionWarmupTypeCachePrefix = "workout.session.warmup.type."
 
     // Timestamps for background persistence
     private var workoutStartTime: Date?
     private var workoutPausedDuration: Int = 0
     private var restTimerEndTime: Date?
+    private var warmupTimerEndTime: Date?
+    private var warmupCardioTypeInProgress: CardioType?
+    private var hasSkippedWarmup = false
 
     var currentExercise: TemplateExerciseDetail? {
         guard currentExerciseIndex < templateExercises.count else { return nil }
@@ -68,6 +79,10 @@ class WorkoutViewModel: ObservableObject {
             guard let notes = session.notes?.lowercased() else { return false }
             return notes.contains(warmupCardioTag)
         }
+    }
+
+    var hasSatisfiedWarmupRequirement: Bool {
+        hasLoggedWarmup || hasSkippedWarmup
     }
 
     var canShuffleCurrentWorkout: Bool {
@@ -142,6 +157,17 @@ class WorkoutViewModel: ObservableObject {
                 triggerRestTimerEnd()
             }
         }
+
+        if isWarmupTimerActive, let endTime = warmupTimerEndTime {
+            let remaining = Int(ceil(endTime.timeIntervalSince(Date())))
+            if remaining > 0 {
+                warmupTimeRemaining = remaining
+            } else {
+                Task { @MainActor in
+                    await finalizeWarmupTimerIfNeeded()
+                }
+            }
+        }
     }
 
     // MARK: - Last Entered Values
@@ -201,6 +227,7 @@ class WorkoutViewModel: ObservableObject {
         sessionNotes = ""
         newPRs = []
         lastEnteredValues = [:]
+        resetWarmupState()
         isWorkoutActive = true
 
         startWorkoutTimer()
@@ -223,6 +250,7 @@ class WorkoutViewModel: ObservableObject {
         sessionNotes = ""
         newPRs = []
         lastEnteredValues = [:]
+        resetWarmupState()
         templateExercises = try applyPersistedExerciseDefaults(
             to: dayPlan.exercises.map(\.asTemplateExerciseDetail)
         )
@@ -271,6 +299,7 @@ class WorkoutViewModel: ObservableObject {
 
         stopWorkoutTimer()
         stopRestTimer()
+        stopWarmupTimer()
         endLiveActivity()
 
         session.completedAt = Date()
@@ -294,6 +323,7 @@ class WorkoutViewModel: ObservableObject {
     func cancelSession() {
         stopWorkoutTimer()
         stopRestTimer()
+        stopWarmupTimer()
         endLiveActivity()
 
         if let session = currentSession {
@@ -409,8 +439,8 @@ class WorkoutViewModel: ObservableObject {
 
     func logSet(reps: Int?, duration: Int?, weight: Double?) async {
         guard let session = currentSession, let current = currentExercise else { return }
-        guard hasLoggedWarmup else {
-            errorMessage = "Bitte zuerst 10 Minuten Warm-up Cardio loggen."
+        guard hasSatisfiedWarmupRequirement else {
+            errorMessage = "Bitte zuerst das 10-minuetige Warm-up starten oder ueberspringen."
             return
         }
 
@@ -496,6 +526,46 @@ class WorkoutViewModel: ObservableObject {
         await addCardioSession(warmup)
     }
 
+    func startWarmupTimer(type: CardioType, duration: Int = 10 * 60) {
+        guard currentSession != nil, !hasSatisfiedWarmupRequirement else { return }
+
+        warmupTimer?.invalidate()
+        warmupTimer = nil
+
+        warmupCardioTypeInProgress = type
+        warmupTimeRemaining = duration
+        warmupTimerTotalTime = duration
+        warmupTimerEndTime = Date().addingTimeInterval(Double(duration))
+        isWarmupTimerActive = true
+        errorMessage = nil
+        persistSessionStateCache()
+
+        warmupTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self = self else { return }
+                guard let endTime = self.warmupTimerEndTime else {
+                    self.stopWarmupTimer()
+                    return
+                }
+
+                let remaining = Int(ceil(endTime.timeIntervalSince(Date())))
+                if remaining > 0 {
+                    self.warmupTimeRemaining = remaining
+                } else {
+                    await self.finalizeWarmupTimerIfNeeded()
+                }
+            }
+        }
+    }
+
+    func skipWarmup() {
+        guard currentSession != nil else { return }
+
+        hasSkippedWarmup = true
+        stopWarmupTimer()
+        persistSessionStateCache()
+    }
+
     func deleteCardioSession(_ cardio: CardioSession) async {
         do {
             try db.deleteCardioSession(cardio)
@@ -575,6 +645,16 @@ class WorkoutViewModel: ObservableObject {
         restTimerTotalTime = 0
         restTimerEndTime = nil
         updateLiveActivity()
+    }
+
+    func stopWarmupTimer() {
+        warmupTimer?.invalidate()
+        warmupTimer = nil
+        isWarmupTimerActive = false
+        warmupTimeRemaining = 0
+        warmupTimerTotalTime = 0
+        warmupTimerEndTime = nil
+        warmupCardioTypeInProgress = nil
     }
 
     func addRestTime(_ seconds: Int) {
@@ -695,6 +775,10 @@ class WorkoutViewModel: ObservableObject {
         formatDuration(restTimeRemaining)
     }
 
+    var formattedWarmupTime: String {
+        formatDuration(warmupTimeRemaining)
+    }
+
     private func applyPersistedExerciseDefaults(
         to exercises: [TemplateExerciseDetail]
     ) throws -> [TemplateExerciseDetail] {
@@ -746,6 +830,19 @@ class WorkoutViewModel: ObservableObject {
             } else {
                 completedSets = []
                 cardioSessions = []
+            }
+
+            hasSkippedWarmup = loadCachedWarmupSkip(sessionId: activeSession.id)
+            if hasLoggedWarmup {
+                hasSkippedWarmup = false
+                stopWarmupTimer()
+            } else if hasSkippedWarmup {
+                stopWarmupTimer()
+            } else {
+                restoreWarmupTimer(sessionId: activeSession.id)
+                if isWarmupTimerActive, warmupTimeRemaining == 0 {
+                    await finalizeWarmupTimerIfNeeded()
+                }
             }
 
             lastEnteredValues = [:]
@@ -828,6 +925,22 @@ class WorkoutViewModel: ObservableObject {
         "\(sessionIndexCachePrefix)\(sessionId.uuidString)"
     }
 
+    private func sessionWarmupSkipCacheKey(sessionId: UUID) -> String {
+        "\(sessionWarmupSkipCachePrefix)\(sessionId.uuidString)"
+    }
+
+    private func sessionWarmupEndCacheKey(sessionId: UUID) -> String {
+        "\(sessionWarmupEndCachePrefix)\(sessionId.uuidString)"
+    }
+
+    private func sessionWarmupTotalCacheKey(sessionId: UUID) -> String {
+        "\(sessionWarmupTotalCachePrefix)\(sessionId.uuidString)"
+    }
+
+    private func sessionWarmupTypeCacheKey(sessionId: UUID) -> String {
+        "\(sessionWarmupTypeCachePrefix)\(sessionId.uuidString)"
+    }
+
     private func persistSessionStateCache() {
         guard let session = currentSession else { return }
 
@@ -835,6 +948,19 @@ class WorkoutViewModel: ObservableObject {
             let data = try JSONEncoder().encode(templateExercises)
             UserDefaults.standard.set(data, forKey: sessionExerciseCacheKey(sessionId: session.id))
             UserDefaults.standard.set(currentExerciseIndex, forKey: sessionIndexCacheKey(sessionId: session.id))
+            UserDefaults.standard.set(hasSkippedWarmup, forKey: sessionWarmupSkipCacheKey(sessionId: session.id))
+
+            if isWarmupTimerActive,
+               let warmupTimerEndTime,
+               let warmupCardioTypeInProgress {
+                UserDefaults.standard.set(warmupTimerEndTime.timeIntervalSince1970, forKey: sessionWarmupEndCacheKey(sessionId: session.id))
+                UserDefaults.standard.set(warmupTimerTotalTime, forKey: sessionWarmupTotalCacheKey(sessionId: session.id))
+                UserDefaults.standard.set(warmupCardioTypeInProgress.rawValue, forKey: sessionWarmupTypeCacheKey(sessionId: session.id))
+            } else {
+                UserDefaults.standard.removeObject(forKey: sessionWarmupEndCacheKey(sessionId: session.id))
+                UserDefaults.standard.removeObject(forKey: sessionWarmupTotalCacheKey(sessionId: session.id))
+                UserDefaults.standard.removeObject(forKey: sessionWarmupTypeCacheKey(sessionId: session.id))
+            }
         } catch {
             // Non-fatal: session still works, only restoration quality degrades.
             print("Failed to persist workout session cache: \(error)")
@@ -851,6 +977,59 @@ class WorkoutViewModel: ObservableObject {
     private func clearSessionStateCache(sessionId: UUID) {
         UserDefaults.standard.removeObject(forKey: sessionExerciseCacheKey(sessionId: sessionId))
         UserDefaults.standard.removeObject(forKey: sessionIndexCacheKey(sessionId: sessionId))
+        UserDefaults.standard.removeObject(forKey: sessionWarmupSkipCacheKey(sessionId: sessionId))
+        UserDefaults.standard.removeObject(forKey: sessionWarmupEndCacheKey(sessionId: sessionId))
+        UserDefaults.standard.removeObject(forKey: sessionWarmupTotalCacheKey(sessionId: sessionId))
+        UserDefaults.standard.removeObject(forKey: sessionWarmupTypeCacheKey(sessionId: sessionId))
+    }
+
+    private func finalizeWarmupTimerIfNeeded() async {
+        guard isWarmupTimerActive else { return }
+
+        let warmupType = warmupCardioTypeInProgress ?? .treadmill
+        stopWarmupTimer()
+        await addWarmupCardio(type: warmupType)
+        persistSessionStateCache()
+    }
+
+    private func restoreWarmupTimer(sessionId: UUID) {
+        stopWarmupTimer()
+
+        guard let rawType = UserDefaults.standard.string(forKey: sessionWarmupTypeCacheKey(sessionId: sessionId)),
+              let cardioType = CardioType(rawValue: rawType) else {
+            return
+        }
+
+        let endInterval = UserDefaults.standard.double(forKey: sessionWarmupEndCacheKey(sessionId: sessionId))
+        let totalTime = UserDefaults.standard.integer(forKey: sessionWarmupTotalCacheKey(sessionId: sessionId))
+        guard endInterval > 0, totalTime > 0 else { return }
+
+        warmupCardioTypeInProgress = cardioType
+        warmupTimerTotalTime = totalTime
+        warmupTimerEndTime = Date(timeIntervalSince1970: endInterval)
+
+        let remaining = Int(ceil(warmupTimerEndTime?.timeIntervalSince(Date()) ?? 0))
+        if remaining <= 0 {
+            isWarmupTimerActive = true
+            warmupTimeRemaining = 0
+            return
+        }
+
+        warmupTimeRemaining = remaining
+        isWarmupTimerActive = true
+        startWarmupTimer(type: cardioType, duration: remaining)
+        warmupTimerTotalTime = totalTime
+        warmupTimerEndTime = Date(timeIntervalSince1970: endInterval)
+        persistSessionStateCache()
+    }
+
+    private func loadCachedWarmupSkip(sessionId: UUID) -> Bool {
+        UserDefaults.standard.bool(forKey: sessionWarmupSkipCacheKey(sessionId: sessionId))
+    }
+
+    private func resetWarmupState() {
+        hasSkippedWarmup = false
+        stopWarmupTimer()
     }
 
     private func snapshots(from dayPlan: WorkoutDayPlanWithExercises) -> [WorkoutPlanExerciseSnapshot] {

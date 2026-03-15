@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct SessionSummaryView: View {
+    @EnvironmentObject private var sessionViewModel: AppSessionViewModel
     let session: SessionWithDetails
     let newPRs: [PersonalRecord]
     let onSaveNotes: (String) -> Void
@@ -129,6 +130,9 @@ struct SessionSummaryView: View {
                     // Done button
                     Button {
                         onSaveNotes(notes)
+                        Task {
+                            await sessionViewModel.syncSnapshot()
+                        }
                         onDismiss()
                     } label: {
                         Text("Done")

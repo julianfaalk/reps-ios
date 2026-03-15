@@ -2,7 +2,9 @@ import SwiftUI
 import Charts
 
 struct ProgressTabView: View {
+    @EnvironmentObject private var storeManager: StoreManager
     @State private var selectedTab = 0
+    @State private var showingPaywall = false
 
     var body: some View {
         NavigationStack {
@@ -15,19 +17,42 @@ struct ProgressTabView: View {
                 .pickerStyle(.segmented)
                 .padding()
 
-                TabView(selection: $selectedTab) {
-                    ChartsView()
-                        .tag(0)
-
-                    MeasurementsListView()
-                        .tag(1)
-
-                    PersonalRecordsView()
-                        .tag(2)
+                Group {
+                    switch selectedTab {
+                    case 0:
+                        if storeManager.isPremium {
+                            ChartsView()
+                        } else {
+                            PremiumLockedView(
+                                title: "Premium Analytics",
+                                subtitle: "Charts und Trendanalysen sind an den Premium-Flow gebunden, damit die App als echtes Produkt verkauft werden kann.",
+                                ctaTitle: "Premium freischalten"
+                            ) {
+                                showingPaywall = true
+                            }
+                        }
+                    case 1:
+                        MeasurementsListView()
+                    default:
+                        if storeManager.isPremium {
+                            PersonalRecordsView()
+                        } else {
+                            PremiumLockedView(
+                                title: "Personal Records in Premium",
+                                subtitle: "Deine PR-Uebersicht bleibt als Premium-Bereich klar vom Free-Tier getrennt.",
+                                ctaTitle: "Paywall oeffnen"
+                            ) {
+                                showingPaywall = true
+                            }
+                        }
+                    }
                 }
-                .tabViewStyle(.page(indexDisplayMode: .never))
             }
             .navigationTitle("Progress")
+            .sheet(isPresented: $showingPaywall) {
+                PaywallView()
+                    .environmentObject(storeManager)
+            }
         }
     }
 }

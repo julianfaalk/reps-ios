@@ -7,11 +7,16 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		2F1C565460BBA56D92B377F9 /* AuthGateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7878826E393A9DFC13BF1AC0 /* AuthGateView.swift */; };
+		4AC5FB39B1C7099C02C35FB9 /* AppSessionViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 139B02FA3639AC78110D5580 /* AppSessionViewModel.swift */; };
+		5DCD3910507AF65F7AA317C3 /* PaywallView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3D1DF07DEA7E6D6BEB87CC8 /* PaywallView.swift */; };
+		6DE0B4C31C34502552C00603 /* AccountModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D897F452231EBD19321A45DF /* AccountModels.swift */; };
+		772861F77D9003080E0B99A5 /* CloudService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 960B2F791FC48883A9F5B885 /* CloudService.swift */; };
+		9CCE72BF026CA3FCF826B52B /* AppConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72FABF03EB9F7F221315A607 /* AppConfig.swift */; };
 		A10000010001 /* WorkoutAppApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000020001 /* WorkoutAppApp.swift */; };
 		A10000010002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000020002 /* ContentView.swift */; };
 		A10000010003 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A10000020003 /* Assets.xcassets */; };
 		A10000010004 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000020004 /* AppSettings.swift */; };
-		A10000010041 /* WorkoutActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000020041 /* WorkoutActivityAttributes.swift */; };
 		A10000010005 /* CardioSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000020005 /* CardioSession.swift */; };
 		A10000010006 /* Exercise.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000020006 /* Exercise.swift */; };
 		A10000010007 /* Measurement.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000020007 /* Measurement.swift */; };
@@ -48,12 +53,20 @@
 		A10000010038 /* AddCardioView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000020038 /* AddCardioView.swift */; };
 		A10000010039 /* LiveWorkoutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000020039 /* LiveWorkoutView.swift */; };
 		A10000010040 /* SessionSummaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000020040 /* SessionSummaryView.swift */; };
+		A10000010041 /* WorkoutActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000020041 /* WorkoutActivityAttributes.swift */; };
 		A10000010042 /* WorkoutPlanGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000020042 /* WorkoutPlanGenerator.swift */; };
 		A10000010043 /* TodayViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000020043 /* TodayViewModel.swift */; };
 		B2DDF2D32F2B46AE00F3BDD2 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = A10000080001 /* GRDB */; };
+		CFDA0D6EC183377C3ED4892E /* StoreManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F13F9CE6F0A20C835907F69F /* StoreManager.swift */; };
+		EFE0B07B45A558DE4845DE2E /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = 0A5979E7AD05776A158D134A /* GoogleSignIn */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		139B02FA3639AC78110D5580 /* AppSessionViewModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AppSessionViewModel.swift; sourceTree = "<group>"; };
+		72FABF03EB9F7F221315A607 /* AppConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AppConfig.swift; sourceTree = "<group>"; };
+		7878826E393A9DFC13BF1AC0 /* AuthGateView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AuthGateView.swift; sourceTree = "<group>"; };
+		7F63932A9C9D9D302556045F /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		960B2F791FC48883A9F5B885 /* CloudService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CloudService.swift; sourceTree = "<group>"; };
 		A10000020001 /* WorkoutAppApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutAppApp.swift; sourceTree = "<group>"; };
 		A10000020002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		A10000020003 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -65,7 +78,6 @@
 		A10000020009 /* Schedule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Schedule.swift; sourceTree = "<group>"; };
 		A10000020010 /* Template.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Template.swift; sourceTree = "<group>"; };
 		A10000020011 /* WorkoutSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutSession.swift; sourceTree = "<group>"; };
-		A10000020041 /* WorkoutActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutActivityAttributes.swift; sourceTree = "<group>"; };
 		A10000020012 /* DatabaseService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseService.swift; sourceTree = "<group>"; };
 		A10000020013 /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
 		A10000020014 /* Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Extensions.swift; sourceTree = "<group>"; };
@@ -95,9 +107,13 @@
 		A10000020038 /* AddCardioView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddCardioView.swift; sourceTree = "<group>"; };
 		A10000020039 /* LiveWorkoutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveWorkoutView.swift; sourceTree = "<group>"; };
 		A10000020040 /* SessionSummaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionSummaryView.swift; sourceTree = "<group>"; };
+		A10000020041 /* WorkoutActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutActivityAttributes.swift; sourceTree = "<group>"; };
 		A10000020042 /* WorkoutPlanGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutPlanGenerator.swift; sourceTree = "<group>"; };
 		A10000020043 /* TodayViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayViewModel.swift; sourceTree = "<group>"; };
 		A10000030001 /* WorkoutApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = WorkoutApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		D897F452231EBD19321A45DF /* AccountModels.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AccountModels.swift; sourceTree = "<group>"; };
+		F13F9CE6F0A20C835907F69F /* StoreManager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StoreManager.swift; sourceTree = "<group>"; };
+		F3D1DF07DEA7E6D6BEB87CC8 /* PaywallView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaywallView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -106,12 +122,22 @@
 			buildActionMask = 2147483647;
 			files = (
 				B2DDF2D32F2B46AE00F3BDD2 /* GRDB in Frameworks */,
+				EFE0B07B45A558DE4845DE2E /* GoogleSignIn in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		07AB1A0C6B0576856AC9EA77 /* Premium */ = {
+			isa = PBXGroup;
+			children = (
+				F3D1DF07DEA7E6D6BEB87CC8 /* PaywallView.swift */,
+			);
+			name = Premium;
+			path = Premium;
+			sourceTree = "<group>";
+		};
 		A10000040001 = {
 			isa = PBXGroup;
 			children = (
@@ -131,6 +157,7 @@
 				A10000040006 /* Utilities */,
 				A10000040007 /* ViewModels */,
 				A10000040008 /* Views */,
+				7F63932A9C9D9D302556045F /* Info.plist */,
 			);
 			path = WorkoutApp;
 			sourceTree = "<group>";
@@ -155,6 +182,7 @@
 				A10000020010 /* Template.swift */,
 				A10000020041 /* WorkoutActivityAttributes.swift */,
 				A10000020011 /* WorkoutSession.swift */,
+				D897F452231EBD19321A45DF /* AccountModels.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -165,6 +193,9 @@
 				A10000020012 /* DatabaseService.swift */,
 				A10000020013 /* NotificationService.swift */,
 				A10000020042 /* WorkoutPlanGenerator.swift */,
+				72FABF03EB9F7F221315A607 /* AppConfig.swift */,
+				960B2F791FC48883A9F5B885 /* CloudService.swift */,
+				F13F9CE6F0A20C835907F69F /* StoreManager.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -189,6 +220,7 @@
 				A10000020021 /* TemplateViewModel.swift */,
 				A10000020043 /* TodayViewModel.swift */,
 				A10000020022 /* WorkoutViewModel.swift */,
+				139B02FA3639AC78110D5580 /* AppSessionViewModel.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -202,6 +234,8 @@
 				A10000040012 /* Settings */,
 				A10000040013 /* Today */,
 				A10000040014 /* Workout */,
+				B0929B3899AFC8180549D11D /* Auth */,
+				07AB1A0C6B0576856AC9EA77 /* Premium */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -266,6 +300,15 @@
 			path = Workout;
 			sourceTree = "<group>";
 		};
+		B0929B3899AFC8180549D11D /* Auth */ = {
+			isa = PBXGroup;
+			children = (
+				7878826E393A9DFC13BF1AC0 /* AuthGateView.swift */,
+			);
+			name = Auth;
+			path = Auth;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -284,6 +327,7 @@
 			name = WorkoutApp;
 			packageProductDependencies = (
 				A10000080001 /* GRDB */,
+				0A5979E7AD05776A158D134A /* GoogleSignIn */,
 			);
 			productName = WorkoutApp;
 			productReference = A10000030001 /* WorkoutApp.app */;
@@ -314,7 +358,8 @@
 			);
 			mainGroup = A10000040001;
 			packageReferences = (
-				A100000B0001 /* XCRemoteSwiftPackageReference "GRDB.swift" */,
+				A100000B0001 /* XCRemoteSwiftPackageReference "GRDB.swift.git" */,
+				2AA25059C3FE0710F4AFFCC6 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS.git" */,
 			);
 			productRefGroup = A10000040003 /* Products */;
 			projectDirPath = "";
@@ -383,6 +428,13 @@
 				A10000010038 /* AddCardioView.swift in Sources */,
 				A10000010039 /* LiveWorkoutView.swift in Sources */,
 				A10000010040 /* SessionSummaryView.swift in Sources */,
+				6DE0B4C31C34502552C00603 /* AccountModels.swift in Sources */,
+				9CCE72BF026CA3FCF826B52B /* AppConfig.swift in Sources */,
+				772861F77D9003080E0B99A5 /* CloudService.swift in Sources */,
+				CFDA0D6EC183377C3ED4892E /* StoreManager.swift in Sources */,
+				4AC5FB39B1C7099C02C35FB9 /* AppSessionViewModel.swift in Sources */,
+				2F1C565460BBA56D92B377F9 /* AuthGateView.swift in Sources */,
+				5DCD3910507AF65F7AA317C3 /* PaywallView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -393,10 +445,12 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = WorkoutApp/WorkoutApp.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 783Z7ZFHV9;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = WorkoutApp/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Workout;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Take progress photos";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Select progress photos";
@@ -420,10 +474,12 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = WorkoutApp/WorkoutApp.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 783Z7ZFHV9;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = WorkoutApp/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Workout;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Take progress photos";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Select progress photos";
@@ -516,7 +572,15 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		A100000B0001 /* XCRemoteSwiftPackageReference "GRDB.swift" */ = {
+		2AA25059C3FE0710F4AFFCC6 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS.git" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/google/GoogleSignIn-iOS.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 8.0.0;
+			};
+		};
+		A100000B0001 /* XCRemoteSwiftPackageReference "GRDB.swift.git" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/groue/GRDB.swift.git";
 			requirement = {
@@ -527,9 +591,14 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		0A5979E7AD05776A158D134A /* GoogleSignIn */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 2AA25059C3FE0710F4AFFCC6 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS.git" */;
+			productName = GoogleSignIn;
+		};
 		A10000080001 /* GRDB */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = A100000B0001 /* XCRemoteSwiftPackageReference "GRDB.swift" */;
+			package = A100000B0001 /* XCRemoteSwiftPackageReference "GRDB.swift.git" */;
 			productName = GRDB;
 		};
 /* End XCSwiftPackageProductDependency section */

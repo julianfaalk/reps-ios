@@ -2,15 +2,82 @@ import SwiftUI
 
 struct SettingsView: View {
     @StateObject private var viewModel = SettingsViewModel()
+    @EnvironmentObject private var sessionViewModel: AppSessionViewModel
+    @EnvironmentObject private var storeManager: StoreManager
     @State private var showingExportOptions = false
     @State private var showingShareSheet = false
     @State private var exportURLs: [URL] = []
     @State private var showingResetAlert = false
     @State private var showingSuccessAlert = false
+    @State private var showingPaywall = false
+    @State private var showingDeleteAccountAlert = false
 
     var body: some View {
         NavigationStack {
             Form {
+                if let currentUser = sessionViewModel.currentUser {
+                    Section("Cloud Account") {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(currentUser.resolvedDisplayName.isEmpty ? "Workout Cloud" : currentUser.resolvedDisplayName)
+                                    .font(.headline)
+                                if let email = currentUser.email {
+                                    Text(email)
+                                        .font(.subheadline)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+
+                            Spacer()
+
+                            Text(storeManager.isPremium ? "Premium" : "Free")
+                                .font(.caption.weight(.bold))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(
+                                    (storeManager.isPremium ? Color.green.opacity(0.18) : Color(.systemGray5)),
+                                    in: Capsule()
+                                )
+                        }
+
+                        Button {
+                            Task {
+                                await sessionViewModel.syncSnapshot()
+                            }
+                        } label: {
+                            Label(sessionViewModel.isSyncing ? "Sync laeuft ..." : "Jetzt mit Workout Cloud synchronisieren", systemImage: "arrow.triangle.2.circlepath")
+                        }
+                        .disabled(sessionViewModel.isSyncing)
+                    }
+                }
+
+                Section("Premium") {
+                    Button {
+                        showingPaywall = true
+                    } label: {
+                        HStack {
+                            Label("Workout App Premium", systemImage: storeManager.isPremium ? "crown.fill" : "sparkles")
+                            Spacer()
+                            if storeManager.isPremium {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundColor(.green)
+                            } else {
+                                Image(systemName: "chevron.right")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+
+                    Button {
+                        Task {
+                            await storeManager.restorePurchases()
+                        }
+                    } label: {
+                        Label("Kaeufe wiederherstellen", systemImage: "arrow.clockwise.circle.fill")
+                    }
+                }
+
                 Section("Timers") {
                     HStack {
                         Text("Default Rest Time")
@@ -100,7 +167,11 @@ struct SettingsView: View {
 
                 Section("Data") {
                     Button {
-                        showingExportOptions = true
+                        if storeManager.isPremium {
+                            showingExportOptions = true
+                        } else {
+                            showingPaywall = true
+                        }
                     } label: {
                         Label("Export Data", systemImage: "square.and.arrow.up")
                     }
@@ -113,6 +184,14 @@ struct SettingsView: View {
                 }
 
                 Section("About") {
+                    Link(destination: AppConfig.privacyURL) {
+                        Label("Privacy Policy", systemImage: "lock.shield.fill")
+                    }
+
+                    Link(destination: AppConfig.termsURL) {
+                        Label("Terms of Service", systemImage: "doc.text.fill")
+                    }
+
                     HStack {
                         Text("Version")
                         Spacer()
@@ -128,8 +207,22 @@ struct SettingsView: View {
                     }
                 }
 
+                Section("Account") {
+                    Button {
+                        sessionViewModel.signOut()
+                    } label: {
+                        Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
+                    }
+
+                    Button(role: .destructive) {
+                        showingDeleteAccountAlert = true
+                    } label: {
+                        Label("Delete Cloud Account", systemImage: "trash.fill")
+                    }
+                }
+
                 Section {
-                    Text("All data is stored locally on your device.")
+                    Text("Workouts bleiben lokal auf deinem Geraet. Workout Cloud speichert dein Konto, Premium-Status und die wichtigsten Fortschrittskennzahlen dauerhaft.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -162,6 +255,10 @@ struct SettingsView: View {
             .sheet(isPresented: $showingShareSheet) {
                 ShareSheet(items: exportURLs)
             }
+            .sheet(isPresented: $showingPaywall) {
+                PaywallView()
+                    .environmentObject(storeManager)
+            }
             .alert("Error", isPresented: Binding(
                 get: { viewModel.errorMessage != nil },
                 set: { if !$0 { viewModel.errorMessage = nil } }
@@ -188,6 +285,21 @@ struct SettingsView: View {
             } message: {
                 Text(viewModel.exportMessage ?? "Operation completed successfully")
             }
+            .alert("Delete Cloud Account?", isPresented: $showingDeleteAccountAlert) {
+                Button("Cancel", role: .cancel) { }
+                Button("Delete", role: .destructive) {
+                    Task {
+                        await sessionViewModel.deleteAccount()
+                    }
+                }
+            } message: {
+                Text("This removes your Workout Cloud account and server-side profile data. Local workout data on this iPhone remains until you reset the database.")
+            }
+            .onDisappear {
+                Task {
+                    await sessionViewModel.syncSnapshot()
+                }
+            }
         }
     }
 }
@@ -204,4 +316,6 @@ struct ShareSheet: UIViewControllerRepresentable {
 
 #Preview {
     SettingsView()
+        .environmentObject(AppSessionViewModel())
+        .environmentObject(StoreManager.shared)
 }
