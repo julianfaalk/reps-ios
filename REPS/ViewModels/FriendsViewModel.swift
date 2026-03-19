@@ -21,15 +21,20 @@ final class FriendsViewModel: ObservableObject {
 
     func load() async {
         isLoading = true
+        errorMessage = nil
         defer { isLoading = false }
 
         do {
-            async let friendsPayload = api.fetchFriends()
-            async let board = api.fetchLeaderboard()
-            payload = try await friendsPayload
-            leaderboard = try await board
+            payload = try await api.fetchFriends()
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = "Friends konnten nicht geladen werden. \(error.localizedDescription)"
+            return
+        }
+
+        do {
+            leaderboard = try await api.fetchLeaderboard()
+        } catch {
+            errorMessage = "Das Leaderboard konnte nicht geladen werden. \(error.localizedDescription)"
         }
     }
 
@@ -38,6 +43,8 @@ final class FriendsViewModel: ObservableObject {
         guard !targetCode.isEmpty else { return }
 
         isProcessing = true
+        errorMessage = nil
+        successMessage = nil
         defer { isProcessing = false }
 
         do {
@@ -52,6 +59,8 @@ final class FriendsViewModel: ObservableObject {
 
     func acceptRequest(id: String) async {
         isProcessing = true
+        errorMessage = nil
+        successMessage = nil
         defer { isProcessing = false }
 
         do {
@@ -65,6 +74,8 @@ final class FriendsViewModel: ObservableObject {
 
     func removeFriend(id: String) async {
         isProcessing = true
+        errorMessage = nil
+        successMessage = nil
         defer { isProcessing = false }
 
         do {

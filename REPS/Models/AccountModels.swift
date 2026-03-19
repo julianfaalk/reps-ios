@@ -38,6 +38,11 @@ struct WorkoutCloudPreferences: Codable, Hashable {
     var restTimerSound: Bool = true
     var restTimerHaptic: Bool = true
     var weekStartsOn: Int = 1
+    var goalFocus: String = TrainingGoalFocus.hypertrophy.rawValue
+    var targetTrainingDaysPerWeek: Int = 4
+    var preferredSessionLengthMinutes: Int = 60
+    var rotationStyle: String = WorkoutRotationStyle.balanced.rawValue
+    var personalPlanLocked: Bool = false
     var preferredLanguage: String = AppLanguage.english.rawValue
     var motivationPushEnabled: Bool = true
     var socialPushEnabled: Bool = true
@@ -47,6 +52,7 @@ struct WorkoutCloudPreferences: Codable, Hashable {
 
     enum CodingKeys: String, CodingKey {
         case defaultRestTime, workoutReminderEnabled, workoutReminderTime, restTimerSound, restTimerHaptic, weekStartsOn
+        case goalFocus, targetTrainingDaysPerWeek, preferredSessionLengthMinutes, rotationStyle, personalPlanLocked
         case preferredLanguage, motivationPushEnabled, socialPushEnabled, socialVisibility, quietHoursStart, quietHoursEnd
     }
 
@@ -57,6 +63,11 @@ struct WorkoutCloudPreferences: Codable, Hashable {
         restTimerSound: Bool = true,
         restTimerHaptic: Bool = true,
         weekStartsOn: Int = 1,
+        goalFocus: String = TrainingGoalFocus.hypertrophy.rawValue,
+        targetTrainingDaysPerWeek: Int = 4,
+        preferredSessionLengthMinutes: Int = 60,
+        rotationStyle: String = WorkoutRotationStyle.balanced.rawValue,
+        personalPlanLocked: Bool = false,
         preferredLanguage: String = AppLanguage.english.rawValue,
         motivationPushEnabled: Bool = true,
         socialPushEnabled: Bool = true,
@@ -70,6 +81,11 @@ struct WorkoutCloudPreferences: Codable, Hashable {
         self.restTimerSound = restTimerSound
         self.restTimerHaptic = restTimerHaptic
         self.weekStartsOn = weekStartsOn
+        self.goalFocus = goalFocus
+        self.targetTrainingDaysPerWeek = targetTrainingDaysPerWeek
+        self.preferredSessionLengthMinutes = preferredSessionLengthMinutes
+        self.rotationStyle = rotationStyle
+        self.personalPlanLocked = personalPlanLocked
         self.preferredLanguage = preferredLanguage
         self.motivationPushEnabled = motivationPushEnabled
         self.socialPushEnabled = socialPushEnabled
@@ -86,6 +102,11 @@ struct WorkoutCloudPreferences: Codable, Hashable {
         restTimerSound = try container.decodeIfPresent(Bool.self, forKey: .restTimerSound) ?? true
         restTimerHaptic = try container.decodeIfPresent(Bool.self, forKey: .restTimerHaptic) ?? true
         weekStartsOn = try container.decodeIfPresent(Int.self, forKey: .weekStartsOn) ?? 1
+        goalFocus = try container.decodeIfPresent(String.self, forKey: .goalFocus) ?? TrainingGoalFocus.hypertrophy.rawValue
+        targetTrainingDaysPerWeek = try container.decodeIfPresent(Int.self, forKey: .targetTrainingDaysPerWeek) ?? 4
+        preferredSessionLengthMinutes = try container.decodeIfPresent(Int.self, forKey: .preferredSessionLengthMinutes) ?? 60
+        rotationStyle = try container.decodeIfPresent(String.self, forKey: .rotationStyle) ?? WorkoutRotationStyle.balanced.rawValue
+        personalPlanLocked = try container.decodeIfPresent(Bool.self, forKey: .personalPlanLocked) ?? false
         preferredLanguage = try container.decodeIfPresent(String.self, forKey: .preferredLanguage) ?? AppLanguage.english.rawValue
         motivationPushEnabled = try container.decodeIfPresent(Bool.self, forKey: .motivationPushEnabled) ?? true
         socialPushEnabled = try container.decodeIfPresent(Bool.self, forKey: .socialPushEnabled) ?? true
@@ -217,10 +238,22 @@ struct WorkoutCloudUser: Codable, Identifiable, Hashable {
     var updatedAt: Date?
 
     var resolvedDisplayName: String {
-        if !profile.displayName.isEmpty {
-            return profile.displayName
+        let trimmedProfileName = profile.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedProfileName.isEmpty {
+            return trimmedProfileName
         }
-        return name
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedName.isEmpty {
+            return trimmedName
+        }
+        if let email,
+           let localPart = email.split(separator: "@").first {
+            let fallback = String(localPart).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !fallback.isEmpty {
+                return fallback
+            }
+        }
+        return ""
     }
 
     var isPremiumActive: Bool {

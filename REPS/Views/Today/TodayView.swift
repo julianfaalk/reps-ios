@@ -48,6 +48,9 @@ private struct TodayInsightPayload: Identifiable {
 struct TodayView: View {
     @StateObject private var viewModel = TodayViewModel()
     @EnvironmentObject var workoutViewModel: WorkoutViewModel
+    @EnvironmentObject private var sessionViewModel: AppSessionViewModel
+    @EnvironmentObject private var storeManager: StoreManager
+    @EnvironmentObject private var localization: LocalizationService
 
     @State private var showingTemplateList = false
     @State private var showingWorkout = false
@@ -56,6 +59,7 @@ struct TodayView: View {
     @State private var selectedPlannedPreview: PlannedWorkoutPreview?
     @State private var shuffleMessage: String?
     @State private var selectedInsight: TodayInsightPayload?
+    @State private var showingLockedPlanPaywall = false
 
     var body: some View {
         NavigationStack {
@@ -65,6 +69,13 @@ struct TodayView: View {
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: TodaySpacing.lg) {
+                        if let lockedPlanSummary, !hasPremiumAccess {
+                            TodayLockedPlanCard(
+                                summary: lockedPlanSummary,
+                                onUnlock: { showingLockedPlanPaywall = true }
+                            )
+                        }
+
                         TodayHeroCard(
                             schedule: viewModel.todaySchedule,
                             dayPlan: viewModel.todayPlan,
@@ -198,6 +209,24 @@ struct TodayView: View {
             .sheet(item: $selectedInsight) { insight in
                 TodayInsightSheet(insight: insight)
             }
+            .fullScreenCover(isPresented: $showingLockedPlanPaywall) {
+                if let lockedPlanSummary {
+                    PaywallView(
+                        planSummary: lockedPlanSummary,
+                        allowsSkip: true,
+                        showsCloseButton: true,
+                        onSkip: {
+                            showingLockedPlanPaywall = false
+                        },
+                        onPurchaseSuccess: {
+                            Task {
+                                await sessionViewModel.completePremiumUnlock()
+                                showingLockedPlanPaywall = false
+                            }
+                        }
+                    )
+                }
+            }
             .alert("Today", isPresented: Binding(
                 get: { viewModel.errorMessage != nil },
                 set: { if !$0 { viewModel.errorMessage = nil } }
@@ -220,6 +249,14 @@ struct TodayView: View {
                     }
             }
         }
+    }
+
+    private var lockedPlanSummary: OnboardingPlanSummary? {
+        sessionViewModel.onboardingPlanSummary
+    }
+
+    private var hasPremiumAccess: Bool {
+        storeManager.isPremium || (sessionViewModel.currentUser?.isPremiumActive ?? false)
     }
 
     private func startTodayWorkout() {
@@ -460,6 +497,128 @@ struct TodayView: View {
                 TodayInsightMetric(label: "Month Workouts", value: "\(snapshot.monthlyWorkoutCount)", tint: .blue)
             ]
         )
+    }
+}
+
+private struct TodayLockedPlanCard: View {
+    @EnvironmentObject private var localization: LocalizationService
+
+    let summary: OnboardingPlanSummary
+    let onUnlock: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(localization.localized("plan.ready.card.title"))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.72))
+                    Text(localization.localized("plan.ready.title"))
+                        .font(.system(size: 28, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                }
+                Spacer()
+                Image(systemName: "lock.fill")
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(.white.opacity(0.9))
+            }
+
+            Text(
+                localization.localized(
+                    "plan.ready.plan.detail",
+                    localization.localized(summary.goalFocus.planTitleKey),
+                    summary.sessionLengthMinutes
+                )
+            )
+            .font(.body)
+            .foregroundStyle(.white.opacity(0.84))
+
+            Text(
+                localization.localized(
+                    "plan.ready.plan.line",
+                    summary.trainingDaysPerWeek,
+                    localization.localized(summary.planStyle.titleKey)
+                )
+            )
+            .font(.headline.weight(.bold))
+            .foregroundStyle(.white)
+
+            HStack(spacing: 10) {
+                TodayLockedTag(label: localization.localized(summary.rotationStyle.titleKey))
+                TodayLockedTag(label: localizedTodayExperienceLevel(summary.experienceLevel))
+                TodayLockedTag(label: localization.localized("wizard.training_days.value", summary.trainingDaysPerWeek))
+            }
+
+            Button(action: onUnlock) {
+                HStack {
+                    Image(systemName: "crown.fill")
+                    Text(localization.localized("paywall.cta.unlock"))
+                        .fontWeight(.bold)
+                    Spacer()
+                    Text(localization.localized("profile.premium.title"))
+                        .font(.subheadline.weight(.semibold))
+                }
+                .padding(.horizontal, 18)
+                .frame(height: 54)
+                .foregroundStyle(Color(red: 0.07, green: 0.11, blue: 0.09))
+                .background(Color.white, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(22)
+        .background(
+            LinearGradient(
+                colors: [
+                    Color(red: 0.08, green: 0.18, blue: 0.15),
+                    Color(red: 0.10, green: 0.34, blue: 0.22),
+                    Color(red: 0.18, green: 0.56, blue: 0.34),
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ),
+            in: RoundedRectangle(cornerRadius: 28, style: .continuous)
+        )
+    }
+}
+
+private struct TodayLockedTag: View {
+    let label: String
+
+    var body: some View {
+        Text(label)
+            .font(.caption.weight(.bold))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(Color.white.opacity(0.16), in: Capsule())
+            .foregroundStyle(.white)
+    }
+}
+
+@MainActor
+private func localizedTodayExperienceLevel(_ rawLevel: String) -> String {
+    let localization = LocalizationService.shared
+    switch rawLevel {
+    case "Beginner":
+        return localization.localized("wizard.level.beginner")
+    case "Advanced":
+        return localization.localized("wizard.level.advanced")
+    default:
+        return localization.localized("wizard.level.intermediate")
+    }
+}
+
+private extension OnboardingPlanStyle {
+    var planStyleLabel: String {
+        switch self {
+        case .pushPull:
+            return "Push / Pull"
+        case .pushPullLegs:
+            return "Push / Pull / Legs"
+        case .pushPullLegsShoulders:
+            return "Push / Pull / Legs / Shoulders"
+        case .highFrequencyPushPullLegs:
+            return "High Frequency PPL"
+        }
     }
 }
 

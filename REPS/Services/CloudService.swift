@@ -258,12 +258,12 @@ final class WorkoutAPIService {
                     throw WorkoutAPIError.decodingError
                 }
             case 401:
+                if let payload = try? JSONDecoder().decode([String: String].self, from: data),
+                   let message = payload["error"],
+                   !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    throw WorkoutAPIError.serverError(message)
+                }
                 if request.value(forHTTPHeaderField: "Authorization") == nil {
-                    if let payload = try? JSONDecoder().decode([String: String].self, from: data),
-                       let message = payload["error"],
-                       !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        throw WorkoutAPIError.serverError(message)
-                    }
                     throw WorkoutAPIError.serverError("Anmeldung fehlgeschlagen.")
                 }
                 throw WorkoutAPIError.unauthorized

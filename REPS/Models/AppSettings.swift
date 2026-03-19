@@ -160,6 +160,7 @@ struct AppSettings {
     var preferredSessionLengthMinutes: Int = 60
     var targetTrainingDaysPerWeek: Int = 4
     var rotationStyle: String = WorkoutRotationStyle.balanced.rawValue
+    var personalPlanLocked: Bool = false
     var preferredLanguage: String = AppLanguage.bestMatch(for: Locale.preferredLanguages.first ?? Locale.current.identifier).rawValue
     var motivationPushEnabled: Bool = true
     var socialPushEnabled: Bool = true
@@ -178,6 +179,7 @@ struct AppSettings {
     static let preferredSessionLengthMinutesKey = "preferredSessionLengthMinutes"
     static let targetTrainingDaysPerWeekKey = "targetTrainingDaysPerWeek"
     static let rotationStyleKey = "rotationStyle"
+    static let personalPlanLockedKey = "personalPlanLocked"
     static let preferredLanguageKey = "preferredLanguage"
     static let motivationPushEnabledKey = "motivationPushEnabled"
     static let socialPushEnabledKey = "socialPushEnabled"

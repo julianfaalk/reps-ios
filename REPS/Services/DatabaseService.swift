@@ -200,6 +200,7 @@ final class DatabaseService {
                 ('preferredSessionLengthMinutes', '60'),
                 ('targetTrainingDaysPerWeek', '4'),
                 ('rotationStyle', 'balanced'),
+                ('personalPlanLocked', 'false'),
                 ('preferredLanguage', 'en'),
                 ('motivationPushEnabled', 'true'),
                 ('socialPushEnabled', 'true'),
@@ -426,6 +427,13 @@ final class DatabaseService {
             }
 
             try Self.applyExerciseCatalogMetadataAndInsertions(db: db, now: Date())
+        }
+
+        migrator.registerMigration("v5_personal_plan_lock_setting") { db in
+            try db.execute(
+                sql: "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
+                arguments: [AppSettings.personalPlanLockedKey, "false"]
+            )
         }
 
         return migrator
@@ -1317,6 +1325,8 @@ final class DatabaseService {
                     settings.targetTrainingDaysPerWeek = Int(entry.value) ?? 4
                 case AppSettings.rotationStyleKey:
                     settings.rotationStyle = entry.value
+                case AppSettings.personalPlanLockedKey:
+                    settings.personalPlanLocked = entry.value == "true"
                 case AppSettings.preferredLanguageKey:
                     settings.preferredLanguage = entry.value
                 case AppSettings.motivationPushEnabledKey:
@@ -1362,6 +1372,7 @@ final class DatabaseService {
             try SettingEntry(key: AppSettings.preferredSessionLengthMinutesKey, value: "\(settings.preferredSessionLengthMinutes)").save(db)
             try SettingEntry(key: AppSettings.targetTrainingDaysPerWeekKey, value: "\(settings.targetTrainingDaysPerWeek)").save(db)
             try SettingEntry(key: AppSettings.rotationStyleKey, value: settings.rotationStyle).save(db)
+            try SettingEntry(key: AppSettings.personalPlanLockedKey, value: settings.personalPlanLocked ? "true" : "false").save(db)
             try SettingEntry(key: AppSettings.preferredLanguageKey, value: settings.preferredLanguage).save(db)
             try SettingEntry(key: AppSettings.motivationPushEnabledKey, value: settings.motivationPushEnabled ? "true" : "false").save(db)
             try SettingEntry(key: AppSettings.socialPushEnabledKey, value: settings.socialPushEnabled ? "true" : "false").save(db)

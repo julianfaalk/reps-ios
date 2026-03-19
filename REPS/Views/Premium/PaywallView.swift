@@ -4,6 +4,7 @@ import SwiftUI
 struct PaywallView: View {
     @EnvironmentObject private var storeManager: StoreManager
     @EnvironmentObject private var localization: LocalizationService
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dismiss) private var dismiss
 
     let planSummary: OnboardingPlanSummary?
@@ -136,21 +137,22 @@ struct PaywallView: View {
                     VStack(spacing: 14) {
                         ZStack {
                             Circle()
-                                .fill(Color(red: 0.89, green: 0.96, blue: 0.90))
+                                .fill(OnboardingPalette.accentSoft(for: colorScheme))
                                 .frame(width: 110, height: 110)
 
                             Image(systemName: "crown.fill")
                                 .font(.system(size: 44))
-                                .foregroundStyle(Color(red: 0.12, green: 0.44, blue: 0.26))
+                                .foregroundStyle(OnboardingPalette.accent)
                         }
 
                         Text(headerTitle)
                             .font(.system(size: 32, weight: .bold, design: .rounded))
                             .multilineTextAlignment(.center)
+                            .foregroundStyle(OnboardingPalette.primaryText(for: colorScheme))
 
                         Text(headerSubtitle)
                             .font(.body)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(OnboardingPalette.secondaryText(for: colorScheme))
                             .multilineTextAlignment(.center)
                     }
                     .padding(.top, 12)
@@ -173,12 +175,19 @@ struct PaywallView: View {
                             text: localization.localized("paywall.feature.progress")
                         )
                     }
+                    .padding(20)
+                    .background(OnboardingPalette.surface(for: colorScheme), in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 28, style: .continuous)
+                            .stroke(OnboardingPalette.border(for: colorScheme), lineWidth: 1)
+                    )
 
                     VStack(spacing: 12) {
                         ForEach(offers) { offer in
                             PaywallProductCard(
                                 offer: offer,
-                                isSelected: selectedTier == offer.tier
+                                isSelected: selectedTier == offer.tier,
+                                colorScheme: colorScheme
                             ) {
                                 selectedTier = offer.tier
                             }
@@ -213,7 +222,7 @@ struct PaywallView: View {
                         .frame(maxWidth: .infinity)
                         .frame(height: 56)
                         .foregroundStyle(.white)
-                        .background(Color(red: 0.12, green: 0.44, blue: 0.26), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .background(OnboardingPalette.accent, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                     }
                     .buttonStyle(.plain)
                     .disabled(selectedProduct == nil)
@@ -241,7 +250,7 @@ struct PaywallView: View {
                     VStack(spacing: 8) {
                         Text(localization.localized("paywall.disclaimer"))
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(OnboardingPalette.secondaryText(for: colorScheme))
                             .multilineTextAlignment(.center)
 
                         HStack(spacing: 16) {
@@ -253,7 +262,7 @@ struct PaywallView: View {
                 }
                 .padding(24)
             }
-            .background(Color(.systemGroupedBackground))
+            .background(OnboardingPalette.background(for: colorScheme))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 if showsCloseButton {
@@ -342,6 +351,8 @@ struct PremiumLockedView: View {
 }
 
 private struct PaywallFeatureLine: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let icon: String
     let text: String
 
@@ -349,12 +360,13 @@ private struct PaywallFeatureLine: View {
         HStack(spacing: 14) {
             Image(systemName: icon)
                 .font(.system(size: 18, weight: .bold))
-                .foregroundStyle(Color(red: 0.12, green: 0.44, blue: 0.26))
+                .foregroundStyle(OnboardingPalette.accent)
                 .frame(width: 34, height: 34)
-                .background(Color(red: 0.89, green: 0.96, blue: 0.90), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .background(OnboardingPalette.accentSoft(for: colorScheme), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
 
             Text(text)
                 .font(.body)
+                .foregroundStyle(OnboardingPalette.primaryText(for: colorScheme))
 
             Spacer()
         }
@@ -364,6 +376,7 @@ private struct PaywallFeatureLine: View {
 private struct PaywallProductCard: View {
     let offer: PaywallOfferCardModel
     let isSelected: Bool
+    let colorScheme: ColorScheme
     let action: () -> Void
 
     var body: some View {
@@ -373,11 +386,11 @@ private struct PaywallProductCard: View {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(offer.title)
                             .font(.headline.weight(.bold))
-                            .foregroundStyle(.primary)
+                            .foregroundStyle(OnboardingPalette.primaryText(for: colorScheme))
 
                         Text(offer.price)
                             .font(.title3.weight(.bold))
-                            .foregroundStyle(.primary)
+                            .foregroundStyle(OnboardingPalette.primaryText(for: colorScheme))
                     }
 
                     Spacer()
@@ -390,42 +403,42 @@ private struct PaywallProductCard: View {
                                 .padding(.vertical, 6)
                                 .background(
                                     offer.isRecommended
-                                        ? Color(red: 0.12, green: 0.44, blue: 0.26)
-                                        : Color(.systemGray5),
+                                        ? OnboardingPalette.accent
+                                        : OnboardingPalette.elevatedSurface(for: colorScheme),
                                     in: Capsule()
                                 )
-                                .foregroundStyle(offer.isRecommended ? .white : .primary)
+                                .foregroundStyle(offer.isRecommended ? .white : OnboardingPalette.primaryText(for: colorScheme))
                         }
                     }
                 }
 
                 Text(offer.subtitle)
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(OnboardingPalette.secondaryText(for: colorScheme))
 
                 if let detail = offer.detail, !detail.isEmpty {
                     Text(detail)
                         .font(.footnote.weight(.semibold))
-                        .foregroundStyle(Color(red: 0.12, green: 0.44, blue: 0.26))
+                        .foregroundStyle(OnboardingPalette.accent)
                 }
 
                 HStack {
                     Spacer()
                     Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                         .font(.title3)
-                        .foregroundStyle(isSelected ? Color(red: 0.12, green: 0.44, blue: 0.26) : .secondary)
+                        .foregroundStyle(isSelected ? OnboardingPalette.accent : OnboardingPalette.secondaryText(for: colorScheme))
                 }
             }
             .padding(18)
             .background(
                 RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .fill(Color(.systemBackground))
+                    .fill(OnboardingPalette.surface(for: colorScheme))
                     .overlay(
                         RoundedRectangle(cornerRadius: 20, style: .continuous)
                             .stroke(
                                 isSelected || offer.isRecommended
-                                    ? Color(red: 0.12, green: 0.44, blue: 0.26)
-                                    : Color.black.opacity(0.06),
+                                    ? OnboardingPalette.accent
+                                    : OnboardingPalette.border(for: colorScheme),
                                 lineWidth: isSelected || offer.isRecommended ? 2 : 1
                             )
                     )

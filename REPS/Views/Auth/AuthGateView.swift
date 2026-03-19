@@ -119,6 +119,7 @@ struct AuthGateView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
 
                         Button {
+                            guard AppConfig.isGoogleSignInConfigured else { return }
                             Task {
                                 guard let user = await sessionViewModel.authService.signInWithGoogle() else {
                                     sessionViewModel.errorMessage = sessionViewModel.authService.errorMessage
@@ -128,11 +129,9 @@ struct AuthGateView: View {
                             }
                         } label: {
                             HStack(spacing: 10) {
-                                Image(systemName: AppConfig.isGoogleSignInConfigured ? "globe" : "wrench.and.screwdriver.fill")
+                                Image(systemName: "globe")
                                     .font(.system(size: 18, weight: .semibold))
-                                Text(AppConfig.isGoogleSignInConfigured
-                                     ? localization.localized("auth.google")
-                                     : localization.localized("auth.google_pending"))
+                                Text(localization.localized("auth.google"))
                                     .font(.headline)
                                 Spacer()
                             }
@@ -217,6 +216,7 @@ struct AuthGateView: View {
 struct OnboardingPlanReadyView: View {
     @EnvironmentObject private var sessionViewModel: AppSessionViewModel
     @EnvironmentObject private var localization: LocalizationService
+    @Environment(\.colorScheme) private var colorScheme
     @State private var showingPaywall = false
 
     private var summary: OnboardingPlanSummary? {
@@ -229,8 +229,12 @@ struct OnboardingPlanReadyView: View {
                 if let summary {
                     VStack(alignment: .leading, spacing: 24) {
                         VStack(alignment: .leading, spacing: 12) {
+                            Text(localization.localized("plan.ready.card.title"))
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(OnboardingPalette.secondaryText(for: colorScheme))
                             Text(localization.localized("plan.ready.title"))
                                 .font(.system(size: 34, weight: .bold, design: .rounded))
+                                .foregroundStyle(OnboardingPalette.primaryText(for: colorScheme))
 
                             Text(
                                 localization.localized(
@@ -240,12 +244,13 @@ struct OnboardingPlanReadyView: View {
                                 )
                             )
                             .font(.body)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(OnboardingPalette.secondaryText(for: colorScheme))
                         }
 
                         VStack(alignment: .leading, spacing: 18) {
                             Text(localization.localized("plan.ready.card.title"))
                                 .font(.headline.weight(.bold))
+                                .foregroundStyle(OnboardingPalette.primaryText(for: colorScheme))
 
                             VStack(alignment: .leading, spacing: 10) {
                                 Text(
@@ -256,6 +261,7 @@ struct OnboardingPlanReadyView: View {
                                     )
                                 )
                                 .font(.title3.weight(.bold))
+                                .foregroundStyle(OnboardingPalette.primaryText(for: colorScheme))
 
                                 Text(
                                     localization.localized(
@@ -265,7 +271,7 @@ struct OnboardingPlanReadyView: View {
                                     )
                                 )
                                 .font(.subheadline)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(OnboardingPalette.secondaryText(for: colorScheme))
                             }
 
                             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
@@ -292,11 +298,15 @@ struct OnboardingPlanReadyView: View {
                             }
                         }
                         .padding(20)
-                        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+                        .background(OnboardingPalette.surface(for: colorScheme), in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                                .stroke(OnboardingPalette.border(for: colorScheme), lineWidth: 1)
+                        )
 
                         Text(localization.localized("plan.ready.footer"))
                             .font(.footnote)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(OnboardingPalette.secondaryText(for: colorScheme))
 
                         Button {
                             showingPaywall = true
@@ -316,7 +326,7 @@ struct OnboardingPlanReadyView: View {
                         .frame(maxWidth: .infinity, minHeight: 320)
                 }
             }
-            .background(Color(.systemGroupedBackground).ignoresSafeArea())
+            .background(OnboardingPalette.background(for: colorScheme).ignoresSafeArea())
             .navigationBarHidden(true)
             .fullScreenCover(isPresented: $showingPaywall) {
                 if let summary {
@@ -328,7 +338,9 @@ struct OnboardingPlanReadyView: View {
                             sessionViewModel.completePostOnboardingOffer()
                         },
                         onPurchaseSuccess: {
-                            sessionViewModel.completePostOnboardingOffer()
+                            Task {
+                                await sessionViewModel.completePremiumUnlock()
+                            }
                         }
                     )
                 }
@@ -340,9 +352,8 @@ struct OnboardingPlanReadyView: View {
 struct ProfileSetupView: View {
     @EnvironmentObject private var sessionViewModel: AppSessionViewModel
     @EnvironmentObject private var localization: LocalizationService
+    @Environment(\.colorScheme) private var colorScheme
 
-    @State private var displayName = ""
-    @State private var goal = ""
     @State private var selectedExperience = "Intermediate"
     @State private var currentStep = 0
     @State private var selectedGoalFocus: TrainingGoalFocus = .hypertrophy
@@ -354,201 +365,240 @@ struct ProfileSetupView: View {
 
     private let levels = ["Beginner", "Intermediate", "Advanced"]
     private let db = DatabaseService.shared
+    private let totalSteps = 4
 
     var body: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 24) {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(localization.localized("wizard.title"))
-                        .font(.system(size: 34, weight: .bold, design: .rounded))
-                    Text(localization.localized("wizard.subtitle"))
-                        .font(.body)
-                        .foregroundStyle(.secondary)
-                }
+            ZStack {
+                OnboardingPalette.background(for: colorScheme)
+                    .ignoresSafeArea()
 
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack(spacing: 8) {
-                        ForEach(0..<3, id: \.self) { index in
-                            Capsule()
-                                .fill(index <= currentStep ? Color.blue : Color.secondary.opacity(0.15))
-                                .frame(height: 8)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 24) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text(localization.localized("wizard.title"))
+                                .font(.system(size: 34, weight: .bold, design: .rounded))
+                                .foregroundStyle(OnboardingPalette.primaryText(for: colorScheme))
+                            Text(localization.localized("wizard.subtitle"))
+                                .font(.body)
+                                .foregroundStyle(OnboardingPalette.secondaryText(for: colorScheme))
                         }
-                    }
 
-                    Text(stepTitle)
-                        .font(.title3.weight(.bold))
+                        VStack(alignment: .leading, spacing: 14) {
+                            HStack(spacing: 8) {
+                                ForEach(0..<totalSteps, id: \.self) { index in
+                                    Capsule()
+                                        .fill(index <= currentStep ? OnboardingPalette.accent : OnboardingPalette.border(for: colorScheme))
+                                        .frame(height: 8)
+                                }
+                            }
 
-                    Group {
-                        switch currentStep {
-                        case 0:
-                            VStack(spacing: 14) {
-                                LabeledField(title: localization.localized("wizard.name"), text: $displayName, prompt: "Julian")
-                                LabeledField(title: localization.localized("wizard.goal"), text: $goal, prompt: localization.localized("wizard.goal.placeholder"))
-
+                            HStack(alignment: .top) {
                                 VStack(alignment: .leading, spacing: 8) {
-                                    Text(localization.localized("wizard.level"))
-                                        .font(.subheadline.weight(.semibold))
-                                    Picker(localization.localized("wizard.level"), selection: $selectedExperience) {
-                                        ForEach(levels, id: \.self) { level in
-                                            Text(localizedLevel(level)).tag(level)
+                                    Text(stepTitle)
+                                        .font(.title3.weight(.bold))
+                                        .foregroundStyle(OnboardingPalette.primaryText(for: colorScheme))
+                                    Text(stepDetail)
+                                        .font(.subheadline)
+                                        .foregroundStyle(OnboardingPalette.secondaryText(for: colorScheme))
+                                }
+                                Spacer()
+                                Text("\(currentStep + 1)/\(totalSteps)")
+                                    .font(.caption.weight(.bold))
+                                    .foregroundStyle(OnboardingPalette.secondaryText(for: colorScheme))
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                    .background(OnboardingPalette.elevatedSurface(for: colorScheme), in: Capsule())
+                            }
+
+                            Group {
+                                switch currentStep {
+                                case 0:
+                                    VStack(alignment: .leading, spacing: 14) {
+                                        ForEach(TrainingGoalFocus.allCases) { focus in
+                                            Button {
+                                                selectedGoalFocus = focus
+                                            } label: {
+                                                WizardOptionRow(
+                                                    emoji: focusEmoji(for: focus),
+                                                    title: localization.localized(focus.titleKey),
+                                                    subtitle: localization.localized(focus.subtitleKey),
+                                                    isSelected: selectedGoalFocus == focus,
+                                                    tint: focusTint(for: focus)
+                                                )
+                                            }
+                                            .buttonStyle(.plain)
                                         }
                                     }
-                                    .pickerStyle(.segmented)
-                                }
-                            }
-                        case 1:
-                            VStack(alignment: .leading, spacing: 18) {
-                                Text(localization.localized("wizard.focus"))
-                                    .font(.subheadline.weight(.semibold))
+                                case 1:
+                                    VStack(alignment: .leading, spacing: 18) {
+                                        CoachSliderCard(
+                                            title: localization.localized("wizard.training_days"),
+                                            value: localization.localized("wizard.training_days.value", Int(targetTrainingDaysPerWeek.rounded())),
+                                            caption: localization.localized("wizard.training_days.caption"),
+                                            colorScheme: colorScheme
+                                        ) {
+                                            Slider(value: $targetTrainingDaysPerWeek, in: 2...6, step: 1)
+                                                .tint(OnboardingPalette.accent)
+                                        }
 
-                                ForEach(TrainingGoalFocus.allCases) { focus in
-                                    Button {
-                                        selectedGoalFocus = focus
-                                    } label: {
-                                        WizardOptionRow(
-                                            emoji: focusEmoji(for: focus),
-                                            title: localization.localized(focus.titleKey),
-                                            subtitle: localization.localized(focus.subtitleKey),
-                                            isSelected: selectedGoalFocus == focus,
-                                            tint: focusTint(for: focus)
-                                        )
+                                        CoachSliderCard(
+                                            title: localization.localized("wizard.session_length"),
+                                            value: "\(Int(preferredSessionLengthMinutes.rounded())) min",
+                                            caption: localization.localized("wizard.session_length.caption"),
+                                            colorScheme: colorScheme
+                                        ) {
+                                            Slider(value: $preferredSessionLengthMinutes, in: 35...105, step: 5)
+                                                .tint(OnboardingPalette.accent)
+                                        }
                                     }
-                                    .buttonStyle(.plain)
-                                }
+                                case 2:
+                                    VStack(alignment: .leading, spacing: 18) {
+                                        VStack(alignment: .leading, spacing: 8) {
+                                            Text(localization.localized("wizard.level"))
+                                                .font(.subheadline.weight(.semibold))
+                                                .foregroundStyle(OnboardingPalette.primaryText(for: colorScheme))
+                                            Picker(localization.localized("wizard.level"), selection: $selectedExperience) {
+                                                ForEach(levels, id: \.self) { level in
+                                                    Text(localizedLevel(level)).tag(level)
+                                                }
+                                            }
+                                            .pickerStyle(.segmented)
+                                        }
 
-                                VStack(alignment: .leading, spacing: 8) {
-                                    Text(localization.localized("wizard.session_length"))
-                                        .font(.subheadline.weight(.semibold))
-                                    HStack {
-                                        Text("\(Int(preferredSessionLengthMinutes.rounded())) min")
-                                            .font(.headline)
-                                        Spacer()
-                                        Text(localization.localized("wizard.session_length.caption"))
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
+                                        VStack(alignment: .leading, spacing: 12) {
+                                            Text(localization.localized("wizard.rotation"))
+                                                .font(.subheadline.weight(.semibold))
+                                                .foregroundStyle(OnboardingPalette.primaryText(for: colorScheme))
+
+                                            ForEach(WorkoutRotationStyle.allCases) { style in
+                                                Button {
+                                                    selectedRotationStyle = style
+                                                } label: {
+                                                    WizardOptionRow(
+                                                        emoji: rotationEmoji(for: style),
+                                                        title: localization.localized(style.titleKey),
+                                                        subtitle: localization.localized(style.subtitleKey),
+                                                        isSelected: selectedRotationStyle == style,
+                                                        tint: rotationTint(for: style)
+                                                    )
+                                                }
+                                                .buttonStyle(.plain)
+                                            }
+                                        }
                                     }
-                                    Slider(value: $preferredSessionLengthMinutes, in: 35...105, step: 5)
-                                }
+                                default:
+                                    VStack(alignment: .leading, spacing: 18) {
+                                        Toggle(isOn: $workoutReminderEnabled) {
+                                            VStack(alignment: .leading, spacing: 4) {
+                                                Text(localization.localized("wizard.notifications.enable"))
+                                                    .font(.subheadline.weight(.semibold))
+                                                    .foregroundStyle(OnboardingPalette.primaryText(for: colorScheme))
+                                                Text(localization.localized("wizard.notifications.copy"))
+                                                    .font(.caption)
+                                                    .foregroundStyle(OnboardingPalette.secondaryText(for: colorScheme))
+                                            }
+                                        }
+                                        .toggleStyle(.switch)
 
-                                VStack(alignment: .leading, spacing: 8) {
-                                    Text(localization.localized("wizard.training_days"))
-                                        .font(.subheadline.weight(.semibold))
-                                    HStack {
-                                        Text(localization.localized("wizard.training_days.value", Int(targetTrainingDaysPerWeek.rounded())))
-                                            .font(.headline)
-                                        Spacer()
-                                        Text(localization.localized("wizard.training_days.caption"))
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
+                                        if workoutReminderEnabled {
+                                            DatePicker(
+                                                localization.localized("wizard.notifications.time"),
+                                                selection: $workoutReminderTime,
+                                                displayedComponents: .hourAndMinute
+                                            )
+                                            .datePickerStyle(.compact)
+                                            .padding(14)
+                                            .background(OnboardingPalette.elevatedSurface(for: colorScheme), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                                        }
+
+                                        VStack(alignment: .leading, spacing: 8) {
+                                            Text(localization.localized("wizard.review_plan"))
+                                                .font(.caption.weight(.bold))
+                                                .foregroundStyle(OnboardingPalette.secondaryText(for: colorScheme))
+                                            Text(planPreviewLine)
+                                                .font(.title3.weight(.bold))
+                                                .foregroundStyle(OnboardingPalette.primaryText(for: colorScheme))
+                                            Text(planPreviewDetail)
+                                                .font(.subheadline)
+                                                .foregroundStyle(OnboardingPalette.secondaryText(for: colorScheme))
+                                        }
+                                        .padding(16)
+                                        .background(OnboardingPalette.elevatedSurface(for: colorScheme), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
                                     }
-                                    Slider(value: $targetTrainingDaysPerWeek, in: 2...6, step: 1)
-                                }
-                            }
-                        default:
-                            VStack(alignment: .leading, spacing: 18) {
-                                Text(localization.localized("wizard.rotation"))
-                                    .font(.subheadline.weight(.semibold))
-
-                                ForEach(WorkoutRotationStyle.allCases) { style in
-                                    Button {
-                                        selectedRotationStyle = style
-                                    } label: {
-                                        WizardOptionRow(
-                                            emoji: rotationEmoji(for: style),
-                                            title: localization.localized(style.titleKey),
-                                            subtitle: localization.localized(style.subtitleKey),
-                                            isSelected: selectedRotationStyle == style,
-                                            tint: rotationTint(for: style)
-                                        )
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-
-                                Toggle(isOn: $workoutReminderEnabled) {
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(localization.localized("wizard.notifications.enable"))
-                                            .font(.subheadline.weight(.semibold))
-                                        Text(localization.localized("wizard.notifications.copy"))
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                                .toggleStyle(.switch)
-
-                                if workoutReminderEnabled {
-                                    DatePicker(
-                                        localization.localized("wizard.notifications.time"),
-                                        selection: $workoutReminderTime,
-                                        displayedComponents: .hourAndMinute
-                                    )
-                                    .datePickerStyle(.compact)
                                 }
                             }
                         }
-                    }
-                }
-                .padding(20)
-                .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+                        .padding(20)
+                        .background(OnboardingPalette.surface(for: colorScheme), in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                                .stroke(OnboardingPalette.border(for: colorScheme), lineWidth: 1)
+                        )
 
-                if let errorMessage = sessionViewModel.errorMessage {
-                    Text(errorMessage)
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(.red)
-                }
+                        if let errorMessage = sessionViewModel.errorMessage {
+                            Text(errorMessage)
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(.red)
+                        }
 
-                Spacer()
-
-                HStack(spacing: 12) {
-                    if currentStep > 0 {
-                        Button {
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                                currentStep -= 1
+                        HStack(spacing: 12) {
+                            if currentStep > 0 {
+                                Button {
+                                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                        currentStep -= 1
+                                    }
+                                } label: {
+                                    Text(localization.localized("common.back"))
+                                        .font(.headline)
+                                        .frame(maxWidth: .infinity)
+                                        .frame(height: 56)
+                                        .foregroundStyle(OnboardingPalette.primaryText(for: colorScheme))
+                                        .background(OnboardingPalette.surface(for: colorScheme), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                                .stroke(OnboardingPalette.border(for: colorScheme), lineWidth: 1)
+                                        )
+                                }
+                                .buttonStyle(.plain)
                             }
-                        } label: {
-                            Text(localization.localized("common.back"))
-                                .font(.headline)
+
+                            Button {
+                                if currentStep < totalSteps - 1 {
+                                    withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
+                                        currentStep += 1
+                                    }
+                                } else {
+                                    Task {
+                                        await completeWizard()
+                                    }
+                                }
+                            } label: {
+                                HStack {
+                                    if sessionViewModel.isSyncing {
+                                        ProgressView()
+                                            .tint(.white)
+                                    }
+                                    Text(
+                                        sessionViewModel.isSyncing
+                                            ? localization.localized("wizard.saving")
+                                            : currentStep < totalSteps - 1
+                                                ? localization.localized("common.continue")
+                                                : localization.localized("wizard.review_plan")
+                                    )
+                                    .font(.headline)
+                                }
                                 .frame(maxWidth: .infinity)
                                 .frame(height: 56)
-                                .foregroundStyle(.primary)
-                                .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                                .foregroundStyle(.white)
+                                .background(OnboardingPalette.accent, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                            }
+                            .buttonStyle(.plain)
                         }
                     }
-
-                    Button {
-                        if currentStep < 2 {
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
-                                currentStep += 1
-                            }
-                        } else {
-                            Task {
-                                await completeWizard()
-                            }
-                        }
-                    } label: {
-                        HStack {
-                            if sessionViewModel.isSyncing {
-                                ProgressView()
-                                    .tint(.white)
-                            }
-                            Text(
-                                sessionViewModel.isSyncing
-                                    ? localization.localized("wizard.saving")
-                                    : currentStep < 2
-                                        ? localization.localized("common.continue")
-                                        : localization.localized("wizard.review_plan")
-                            )
-                                .font(.headline)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 56)
-                        .foregroundStyle(.white)
-                        .background(Color(red: 0.12, green: 0.44, blue: 0.26), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
+                    .padding(24)
                 }
             }
-            .padding(24)
-            .background(Color(.systemGroupedBackground).ignoresSafeArea())
             .navigationBarHidden(true)
             .task {
                 await seedWizardDefaults()
@@ -559,11 +609,55 @@ struct ProfileSetupView: View {
     private var stepTitle: String {
         switch currentStep {
         case 0:
-            return localization.localized("wizard.step.profile")
+            return localization.localized("wizard.focus")
         case 1:
-            return localization.localized("wizard.step.focus")
+            return localization.localized("wizard.training_days")
+        case 2:
+            return localization.localized("wizard.rotation")
         default:
-            return localization.localized("wizard.step.notifications")
+            return localization.localized("wizard.notifications.enable")
+        }
+    }
+
+    private var stepDetail: String {
+        switch currentStep {
+        case 0:
+            return localization.localized(selectedGoalFocus.subtitleKey)
+        case 1:
+            return planPreviewLine
+        case 2:
+            return localizedExperienceLevel(selectedExperience, localization: localization) + " · " + localization.localized(selectedRotationStyle.titleKey)
+        default:
+            return localization.localized("wizard.notifications.copy")
+        }
+    }
+
+    private var planPreviewLine: String {
+        localization.localized(
+            "plan.ready.plan.line",
+            Int(targetTrainingDaysPerWeek.rounded()),
+            localization.localized(previewPlanStyle.titleKey)
+        )
+    }
+
+    private var planPreviewDetail: String {
+        localization.localized(
+            "plan.ready.plan.detail",
+            localization.localized(selectedGoalFocus.planTitleKey),
+            Int(preferredSessionLengthMinutes.rounded())
+        )
+    }
+
+    private var previewPlanStyle: OnboardingPlanStyle {
+        switch Int(targetTrainingDaysPerWeek.rounded()) {
+        case 2:
+            return .pushPull
+        case 3:
+            return .pushPullLegs
+        case 4:
+            return .pushPullLegsShoulders
+        default:
+            return .highFrequencyPushPullLegs
         }
     }
 
@@ -586,20 +680,17 @@ struct ProfileSetupView: View {
         }
 
         await sessionViewModel.completeOnboarding(
-            displayName: displayName,
-            goal: goal,
+            displayName: sessionViewModel.currentUser?.resolvedDisplayName ?? "",
+            goal: "",
             experienceLevel: selectedExperience,
             localSettings: settings
         )
     }
 
     private func seedWizardDefaults() async {
-        if let currentUser = sessionViewModel.currentUser {
-            displayName = currentUser.resolvedDisplayName
-            goal = currentUser.profile.goal
-            if !currentUser.profile.experienceLevel.isEmpty {
-                selectedExperience = currentUser.profile.experienceLevel
-            }
+        if let currentUser = sessionViewModel.currentUser,
+           !currentUser.profile.experienceLevel.isEmpty {
+            selectedExperience = currentUser.profile.experienceLevel
         }
 
         guard let settings = try? db.fetchSettings() else { return }
@@ -664,7 +755,39 @@ struct ProfileSetupView: View {
     }
 }
 
+private struct CoachSliderCard<Content: View>: View {
+    let title: String
+    let value: String
+    let caption: String
+    let colorScheme: ColorScheme
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(OnboardingPalette.primaryText(for: colorScheme))
+                Spacer()
+                Text(value)
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(OnboardingPalette.primaryText(for: colorScheme))
+            }
+
+            Text(caption)
+                .font(.caption)
+                .foregroundStyle(OnboardingPalette.secondaryText(for: colorScheme))
+
+            content
+        }
+        .padding(16)
+        .background(OnboardingPalette.elevatedSurface(for: colorScheme), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+}
+
 private struct WizardOptionRow: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let emoji: String
     let title: String
     let subtitle: String
@@ -681,10 +804,10 @@ private struct WizardOptionRow: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text(title)
                     .font(.headline.weight(.bold))
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(OnboardingPalette.primaryText(for: colorScheme))
                 Text(subtitle)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(OnboardingPalette.secondaryText(for: colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
             }
 
@@ -695,10 +818,10 @@ private struct WizardOptionRow: View {
                 .foregroundStyle(isSelected ? tint : Color.secondary.opacity(0.45))
         }
         .padding(14)
-        .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .background(OnboardingPalette.elevatedSurface(for: colorScheme), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(isSelected ? tint.opacity(0.45) : Color.black.opacity(0.05), lineWidth: 1)
+                .stroke(isSelected ? tint.opacity(0.45) : OnboardingPalette.border(for: colorScheme), lineWidth: 1)
         )
     }
 }
@@ -762,6 +885,7 @@ private struct FeatureRow: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
                     .font(.subheadline.weight(.bold))
+                    .foregroundStyle(OnboardingPalette.primaryText(for: colorScheme))
                 Text(subtitle)
                     .font(.footnote)
                     .foregroundStyle(OnboardingPalette.secondaryText(for: colorScheme))
@@ -804,6 +928,8 @@ private struct LabeledField: View {
 }
 
 private struct PlanReadyMetricCard: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let label: String
     let value: String
 
@@ -811,14 +937,14 @@ private struct PlanReadyMetricCard: View {
         VStack(alignment: .leading, spacing: 6) {
             Text(label)
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(OnboardingPalette.secondaryText(for: colorScheme))
             Text(value)
                 .font(.headline.weight(.bold))
-                .foregroundStyle(.primary)
+                .foregroundStyle(OnboardingPalette.primaryText(for: colorScheme))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
-        .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .background(OnboardingPalette.elevatedSurface(for: colorScheme), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 }
 
@@ -922,69 +1048,91 @@ private struct EmailLoginSheet: View {
     let onSend: () async -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var localization: LocalizationService
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 24) {
-                Spacer()
+            ZStack {
+                OnboardingPalette.background(for: colorScheme)
+                    .ignoresSafeArea()
 
-                Image(systemName: magicLinkSent ? "paperplane.circle.fill" : "envelope.badge.fill")
-                    .font(.system(size: 60))
-                    .foregroundStyle(Color(red: 0.12, green: 0.44, blue: 0.26))
+                VStack(spacing: 24) {
+                    Spacer()
 
-                Text(magicLinkSent ? localization.localized("auth.email.sent") : localization.localized("auth.email.title"))
-                    .font(.title2.weight(.bold))
+                    VStack(spacing: 24) {
+                        Image(systemName: magicLinkSent ? "paperplane.circle.fill" : "envelope.badge.fill")
+                            .font(.system(size: 60))
+                            .foregroundStyle(OnboardingPalette.accent)
 
-                Text(
-                    magicLinkSent
-                    ? localization.localized("auth.email.sent_copy")
-                    : localization.localized("auth.email.copy")
-                )
-                .font(.body)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
+                        Text(magicLinkSent ? localization.localized("auth.email.sent") : localization.localized("auth.email.title"))
+                            .font(.title2.weight(.bold))
+                            .foregroundStyle(OnboardingPalette.primaryText(for: colorScheme))
 
-                if !magicLinkSent {
-                    TextField(localization.localized("auth.email.placeholder"), text: $email)
-                        .keyboardType(.emailAddress)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .padding(.horizontal, 16)
-                        .frame(height: 52)
-                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        Text(
+                            magicLinkSent
+                            ? localization.localized("auth.email.sent_copy")
+                            : localization.localized("auth.email.copy")
+                        )
+                        .font(.body)
+                        .foregroundStyle(OnboardingPalette.secondaryText(for: colorScheme))
+                        .multilineTextAlignment(.center)
 
-                    if let errorMessage {
-                        Text(errorMessage)
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(.red)
-                    }
+                        if !magicLinkSent {
+                            TextField(localization.localized("auth.email.placeholder"), text: $email)
+                                .keyboardType(.emailAddress)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .padding(.horizontal, 16)
+                                .frame(height: 52)
+                                .background(OnboardingPalette.elevatedSurface(for: colorScheme), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
 
-                    Button {
-                        Task {
-                            await onSend()
-                        }
-                        } label: {
-                            HStack {
-                                if isLoading {
-                                    ProgressView()
-                                        .tint(.white)
+                            if let errorMessage {
+                                Text(errorMessage)
+                                    .font(.footnote.weight(.semibold))
+                                    .foregroundStyle(.red)
+                            }
+
+                            Button {
+                                Task {
+                                    await onSend()
                                 }
-                                Text(isLoading ? localization.localized("auth.email.sending") : localization.localized("auth.email.send"))
-                                .font(.headline)
+                            } label: {
+                                HStack {
+                                    if isLoading {
+                                        ProgressView()
+                                            .tint(.white)
+                                    }
+                                    Text(isLoading ? localization.localized("auth.email.sending") : localization.localized("auth.email.send"))
+                                        .font(.headline)
+                                }
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 54)
+                                .foregroundStyle(.white)
+                                .background(OnboardingPalette.accent, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(isLoading || !isValidEmail)
+                        } else {
+                            Text(trimmedEmail)
+                                .font(.headline.weight(.bold))
+                                .foregroundStyle(OnboardingPalette.primaryText(for: colorScheme))
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 12)
+                                .background(OnboardingPalette.elevatedSurface(for: colorScheme), in: Capsule())
                         }
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 54)
-                        .foregroundStyle(.white)
-                        .background(Color(red: 0.12, green: 0.44, blue: 0.26), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                     }
-                    .buttonStyle(.plain)
-                    .disabled(isLoading || email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
+                    .padding(24)
+                    .background(OnboardingPalette.surface(for: colorScheme), in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 28, style: .continuous)
+                            .stroke(OnboardingPalette.border(for: colorScheme), lineWidth: 1)
+                    )
 
-                Spacer()
+                    Spacer()
+                }
+                .padding(24)
             }
-            .padding(24)
             .navigationTitle("")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -994,5 +1142,13 @@ private struct EmailLoginSheet: View {
                 }
             }
         }
+    }
+
+    private var trimmedEmail: String {
+        email.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var isValidEmail: Bool {
+        trimmedEmail.contains("@") && trimmedEmail.contains(".")
     }
 }

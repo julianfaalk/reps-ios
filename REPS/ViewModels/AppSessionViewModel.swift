@@ -65,7 +65,7 @@ final class AppSessionViewModel: ObservableObject {
 
         await applyServerState(user)
         await StoreManager.shared.checkEntitlements()
-        refreshStateAfterEntitlementCheck()
+        await refreshStateAfterEntitlementCheck()
         if state == .ready {
             await syncSnapshot()
             await syncCurrentDevice()
@@ -76,7 +76,7 @@ final class AppSessionViewModel: ObservableObject {
         await applyServerState(user)
         errorMessage = nil
         await StoreManager.shared.checkEntitlements()
-        refreshStateAfterEntitlementCheck()
+        await refreshStateAfterEntitlementCheck()
         await syncSnapshot()
         await syncCurrentDevice()
     }
@@ -87,20 +87,21 @@ final class AppSessionViewModel: ObservableObject {
         experienceLevel: String,
         localSettings: AppSettings? = nil
     ) async {
-        let trimmedDisplayName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedDisplayName.isEmpty else {
-            errorMessage = localization.localized("wizard.profile.name_required")
-            return
-        }
+        let fallbackDisplayName = currentUser?.resolvedDisplayName ?? ""
+        let trimmedDisplayName = displayName
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .isEmpty ? fallbackDisplayName.trimmingCharacters(in: .whitespacesAndNewlines) : displayName.trimmingCharacters(in: .whitespacesAndNewlines)
 
         if var localSettings {
             do {
+                let hasPremiumAccess = StoreManager.shared.isPremium || (currentUser?.isPremiumActive ?? false)
                 localSettings.trainingSetupCompleted = true
+                localSettings.personalPlanLocked = !hasPremiumAccess
                 try db.saveSettings(localSettings)
-                let summary = try configurePersonalizedSchedule(
-                    using: localSettings,
+                let summary = try buildOnboardingPlanSummary(
                     displayName: trimmedDisplayName,
-                    experienceLevel: experienceLevel
+                    experienceLevel: experienceLevel,
+                    settings: localSettings
                 )
                 onboardingPlanSummary = summary
 
@@ -133,21 +134,30 @@ final class AppSessionViewModel: ObservableObject {
 
         if StoreManager.shared.isPremium || currentUser.isPremiumActive {
             markPostOnboardingOfferPending(false, for: currentUser)
+            await unlockPersonalizedPlanIfNeeded(forceSync: true)
             onboardingPlanSummary = nil
             requestedTab = 0
         } else {
             markPostOnboardingOfferPending(true, for: currentUser)
         }
 
-        refreshStateAfterEntitlementCheck()
+        await refreshStateAfterEntitlementCheck()
     }
 
     func completePostOnboardingOffer() {
         guard let currentUser else { return }
         markPostOnboardingOfferPending(false, for: currentUser)
+        requestedTab = 0
+        updateState(for: currentUser)
+    }
+
+    func completePremiumUnlock() async {
+        guard let currentUser else { return }
+        markPostOnboardingOfferPending(false, for: currentUser)
+        await unlockPersonalizedPlanIfNeeded(forceSync: true)
         onboardingPlanSummary = nil
         requestedTab = 0
-        refreshStateAfterEntitlementCheck()
+        await refreshStateAfterEntitlementCheck()
     }
 
     func syncSnapshot(profileOverride: WorkoutProfile? = nil) async {
@@ -220,8 +230,7 @@ final class AppSessionViewModel: ObservableObject {
     }
 
     private func updateState(for user: WorkoutCloudUser) {
-        let displayName = user.resolvedDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
-        if displayName.isEmpty || user.onboardingCompleted == false {
+        if user.onboardingCompleted == false {
             state = .profileSetup
         } else if shouldPresentPostOnboardingOffer(for: user) {
             if onboardingPlanSummary == nil {
@@ -294,6 +303,12 @@ final class AppSessionViewModel: ObservableObject {
         settings.restTimerSound = user.preferences.restTimerSound
         settings.restTimerHaptic = user.preferences.restTimerHaptic
         settings.weekStartsOn = user.preferences.weekStartsOn
+        settings.trainingSetupCompleted = user.onboardingCompleted
+        settings.goalFocus = user.preferences.goalFocus
+        settings.preferredSessionLengthMinutes = user.preferences.preferredSessionLengthMinutes
+        settings.targetTrainingDaysPerWeek = user.preferences.targetTrainingDaysPerWeek
+        settings.rotationStyle = user.preferences.rotationStyle
+        settings.personalPlanLocked = user.preferences.personalPlanLocked
         settings.preferredLanguage = user.preferences.preferredLanguage
         settings.motivationPushEnabled = user.preferences.motivationPushEnabled
         settings.socialPushEnabled = user.preferences.socialPushEnabled
@@ -374,13 +389,15 @@ final class AppSessionViewModel: ObservableObject {
         #endif
     }
 
-    private func refreshStateAfterEntitlementCheck() {
+    private func refreshStateAfterEntitlementCheck() async {
         guard let currentUser else { return }
 
         if StoreManager.shared.isPremium || currentUser.isPremiumActive {
             markPostOnboardingOfferPending(false, for: currentUser)
+            await unlockPersonalizedPlanIfNeeded(forceSync: true)
             onboardingPlanSummary = nil
-        } else if shouldPresentPostOnboardingOffer(for: currentUser), onboardingPlanSummary == nil {
+        } else if onboardingPlanSummary == nil,
+                  (shouldPresentPostOnboardingOffer(for: currentUser) || shouldKeepLockedPlanSummary(for: currentUser)) {
             onboardingPlanSummary = try? rebuildPendingOnboardingSummary(for: currentUser)
         }
 
@@ -415,6 +432,35 @@ final class AppSessionViewModel: ObservableObject {
             experienceLevel: user.profile.experienceLevel,
             settings: settings
         )
+    }
+
+    private func shouldKeepLockedPlanSummary(for user: WorkoutCloudUser) -> Bool {
+        guard user.onboardingCompleted else { return false }
+        guard let settings = try? db.fetchSettings() else { return false }
+        return settings.personalPlanLocked
+    }
+
+    private func unlockPersonalizedPlanIfNeeded(forceSync: Bool) async {
+        guard let currentUser else { return }
+
+        do {
+            var settings = try db.fetchSettings()
+            guard settings.trainingSetupCompleted, settings.personalPlanLocked else { return }
+
+            _ = try configurePersonalizedSchedule(
+                using: settings,
+                displayName: currentUser.resolvedDisplayName,
+                experienceLevel: currentUser.profile.experienceLevel
+            )
+            settings.personalPlanLocked = false
+            try db.saveSettings(settings)
+
+            if forceSync {
+                await syncSnapshot()
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 
     private func configurePersonalizedSchedule(
@@ -625,6 +671,11 @@ private struct WorkoutSnapshotBuilder {
             restTimerSound: settings.restTimerSound,
             restTimerHaptic: settings.restTimerHaptic,
             weekStartsOn: settings.weekStartsOn,
+            goalFocus: settings.goalFocus,
+            targetTrainingDaysPerWeek: settings.targetTrainingDaysPerWeek,
+            preferredSessionLengthMinutes: settings.preferredSessionLengthMinutes,
+            rotationStyle: settings.rotationStyle,
+            personalPlanLocked: settings.personalPlanLocked,
             preferredLanguage: settings.preferredLanguage,
             motivationPushEnabled: settings.motivationPushEnabled,
             socialPushEnabled: settings.socialPushEnabled,

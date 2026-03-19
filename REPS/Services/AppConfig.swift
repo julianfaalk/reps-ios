@@ -35,13 +35,12 @@ enum AppConfig {
         "Schultern, Arme & Core",
     ]
 
-    // Fill these once the dedicated Google OAuth client for com.julianfalk.reps exists.
-    static let googleClientID: String? = nil
-    static let googleServerClientID: String? = nil
+    static let googleClientID = infoString(for: "GIDClientID") ?? infoString(for: "REPSGoogleClientID")
+    static let googleServerClientID = infoString(for: "REPSGoogleServerClientID")
+    static let googleReversedClientID = infoString(for: "REPSGoogleReversedClientID")
 
     static var isGoogleSignInConfigured: Bool {
-        guard let googleClientID else { return false }
-        return !googleClientID.isEmpty
+        googleClientID != nil && googleReversedClientID != nil
     }
 
     static func fallbackDisplayPrice(for productID: String, locale: Locale = .current) -> String? {
@@ -55,5 +54,14 @@ enum AppConfig {
         formatter.maximumFractionDigits = 2
 
         return formatter.string(from: NSDecimalNumber(decimal: fallback.usdPrice))
+    }
+
+    private static func infoString(for key: String) -> String? {
+        guard let value = Bundle.main.object(forInfoDictionaryKey: key) as? String else {
+            return nil
+        }
+
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }

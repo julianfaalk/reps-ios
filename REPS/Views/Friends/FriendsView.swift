@@ -11,6 +11,24 @@ struct FriendsView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     inviteCard
 
+                    if let errorMessage = viewModel.errorMessage {
+                        FriendsStatusBanner(
+                            icon: "exclamationmark.triangle.fill",
+                            title: localization.localized("common.error"),
+                            message: errorMessage,
+                            tint: .red
+                        )
+                    }
+
+                    if let successMessage = viewModel.successMessage {
+                        FriendsStatusBanner(
+                            icon: "checkmark.circle.fill",
+                            title: localization.localized("common.success"),
+                            message: successMessage,
+                            tint: OnboardingPalette.accent
+                        )
+                    }
+
                     if !viewModel.payload.incomingRequests.isEmpty || !viewModel.payload.outgoingRequests.isEmpty {
                         requestsSection
                     }
@@ -33,26 +51,6 @@ struct FriendsView: View {
             }
             .refreshable {
                 await viewModel.load()
-            }
-            .alert(localization.localized("common.error"), isPresented: Binding(
-                get: { viewModel.errorMessage != nil },
-                set: { if !$0 { viewModel.errorMessage = nil } }
-            )) {
-                Button(localization.localized("common.ok")) {
-                    viewModel.errorMessage = nil
-                }
-            } message: {
-                Text(viewModel.errorMessage ?? "")
-            }
-            .alert(localization.localized("common.success"), isPresented: Binding(
-                get: { viewModel.successMessage != nil },
-                set: { if !$0 { viewModel.successMessage = nil } }
-            )) {
-                Button(localization.localized("common.ok")) {
-                    viewModel.successMessage = nil
-                }
-            } message: {
-                Text(viewModel.successMessage ?? "")
             }
         }
     }
@@ -287,5 +285,35 @@ struct FriendsView: View {
     private func handlePendingInvite() async {
         guard let inviteCode = sessionViewModel.consumePendingInviteCode() else { return }
         await viewModel.sendInviteRequest(using: inviteCode)
+    }
+}
+
+private struct FriendsStatusBanner: View {
+    let icon: String
+    let title: String
+    let message: String
+    let tint: Color
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(tint)
+                .frame(width: 32, height: 32)
+                .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.subheadline.weight(.bold))
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer()
+        }
+        .padding(14)
+        .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 }
