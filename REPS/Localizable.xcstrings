@@ -882,13 +882,13 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Apple Login ist sofort einsatzbereit. E-Mail und Premium laufen ueber deine eigene Workout-API und MongoDB."
+            "value" : "Apple Login ist sofort einsatzbereit. E-Mail und Premium laufen ueber deine eigene REPS-API und MongoDB."
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Apple sign-in works now. Email and Premium run on your own Workout API and MongoDB."
+            "value" : "Apple sign-in works now. Email and Premium run on your own REPS API and MongoDB."
           }
         },
         "es" : {

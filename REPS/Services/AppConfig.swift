@@ -6,7 +6,7 @@ enum AppConfig {
         let usdPrice: Decimal
     }
 
-    static let apiBaseURL = "https://julianfalk.dev/workout-api"
+    static let apiBaseURL = "https://julianfalk.dev/reps-api"
     static let supportEmail = "support@julianfalk.dev"
     static let appScheme = "reps"
     static let privacyURL = URL(string: "\(apiBaseURL)/privacy")!

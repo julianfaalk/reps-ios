@@ -8,18 +8,18 @@ SwiftUI iOS app for workout tracking.
 - REPS Cloud account flow
 - Apple Sign In
 - Premium/paywall flow scaffold
-- Workout stats sync to `workout-api`
+- Workout stats sync to `reps-api`
 - Warm-up cardio gate with timer and skip flow
 
 ## Backend
 
 The app is configured to talk to:
 
-- `https://julianfalk.dev/workout-api`
+- `https://julianfalk.dev/reps-api`
 
 Related backend repo:
 
-- [workout-api](https://github.com/julianfaalk/workout-api)
+- [reps-api](https://github.com/julianfaalk/reps-api)
 
 ## Project
 
