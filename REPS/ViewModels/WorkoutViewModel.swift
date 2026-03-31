@@ -262,10 +262,6 @@ class WorkoutViewModel: ObservableObject {
     }
 
     private func loadOrCreateDayPlan(templateId: UUID, date: Date) throws -> WorkoutDayPlanWithExercises {
-        if let existing = try db.fetchWorkoutDayPlan(date: date, templateId: templateId) {
-            return existing
-        }
-
         guard let template = try db.fetchTemplate(id: templateId) else {
             throw NSError(
                 domain: "WorkoutViewModel",
@@ -274,20 +270,30 @@ class WorkoutViewModel: ObservableObject {
             )
         }
 
+        let normalizedDate = Calendar.current.startOfDay(for: date)
+        let existingPlan = try db.fetchWorkoutDayPlan(date: normalizedDate, templateId: templateId)
+        if let existingPlan {
+            let exercises = existingPlan.exercises.map(\.exercise)
+            if planGenerator.supportsSavedPlan(template: template, exercises: exercises) {
+                return existingPlan
+            }
+        }
+
         let settings = try db.fetchSettings()
         let rotationStyle = settings.rotationStyleValue
-        let normalizedDate = Calendar.current.startOfDay(for: date)
         let completedTemplateSessions = try db.fetchCompletedSessionCount(templateId: templateId, before: normalizedDate)
 
         if rotationStyle.cadenceSessions > 1,
            completedTemplateSessions > 0,
            completedTemplateSessions % rotationStyle.cadenceSessions != 0,
-           let latestPlan = try db.fetchLatestWorkoutDayPlan(templateId: templateId, before: normalizedDate) {
+           let latestPlan = try db.fetchLatestWorkoutDayPlan(templateId: templateId, before: normalizedDate),
+           planGenerator.supportsSavedPlan(template: template, exercises: latestPlan.exercises.map(\.exercise)) {
             return try db.saveWorkoutDayPlan(
                 date: normalizedDate,
                 template: template,
                 exercises: dayPlanDrafts(from: latestPlan),
-                shuffleCount: 0
+                shuffleCount: 0,
+                existingPlanId: existingPlan?.plan.id
             )
         }
 
@@ -310,7 +316,8 @@ class WorkoutViewModel: ObservableObject {
             date: normalizedDate,
             template: template,
             exercises: build.exercises,
-            shuffleCount: 0
+            shuffleCount: 0,
+            existingPlanId: existingPlan?.plan.id
         )
     }
 

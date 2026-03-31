@@ -49,14 +49,14 @@ struct FriendsView: View {
             }
             .navigationTitle(localization.localized("friends.title"))
             .task {
-                await viewModel.load()
+                await refreshFriendsState()
                 await handlePendingInvite()
             }
             .task(id: sessionViewModel.pendingInviteCode) {
                 await handlePendingInvite()
             }
             .refreshable {
-                await viewModel.load()
+                await refreshFriendsState()
             }
         }
     }
@@ -307,6 +307,11 @@ struct FriendsView: View {
     private func handlePendingInvite() async {
         guard let inviteCode = sessionViewModel.consumePendingInviteCode() else { return }
         await viewModel.sendInviteRequest(using: inviteCode)
+    }
+
+    private func refreshFriendsState() async {
+        await sessionViewModel.syncSnapshot()
+        await viewModel.load()
     }
 }
 

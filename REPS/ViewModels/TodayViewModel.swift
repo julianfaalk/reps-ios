@@ -420,8 +420,13 @@ final class TodayViewModel: ObservableObject {
         }
 
         let normalizedDate = Calendar.current.startOfDay(for: date)
-        if let existing = try db.fetchWorkoutDayPlan(date: normalizedDate, templateId: template.id) {
-            return ResolvedWorkoutDayPlan(plan: existing, isPersisted: true, isReusedBlock: false)
+        let existingPlan = try db.fetchWorkoutDayPlan(date: normalizedDate, templateId: template.id)
+        let replacementPlanID = existingPlan?.plan.id
+        if let existing = existingPlan {
+            let exercises = existing.exercises.map(\.exercise)
+            if planGenerator.supportsSavedPlan(template: template, exercises: exercises) {
+                return ResolvedWorkoutDayPlan(plan: existing, isPersisted: true, isReusedBlock: false)
+            }
         }
 
         let rotationStyle = appSettings.rotationStyleValue
@@ -430,13 +435,15 @@ final class TodayViewModel: ObservableObject {
         if rotationStyle.cadenceSessions > 1,
            completedTemplateSessions > 0,
            completedTemplateSessions % rotationStyle.cadenceSessions != 0,
-           let latestPlan = try db.fetchLatestWorkoutDayPlan(templateId: template.id, before: normalizedDate) {
+           let latestPlan = try db.fetchLatestWorkoutDayPlan(templateId: template.id, before: normalizedDate),
+           planGenerator.supportsSavedPlan(template: template, exercises: latestPlan.exercises.map(\.exercise)) {
             let reusedPlan = try materializeDayPlan(
                 date: normalizedDate,
                 template: template,
                 drafts: planDrafts(from: latestPlan),
                 persistIfNeeded: persistIfNeeded,
-                shuffleCount: 0
+                shuffleCount: 0,
+                existingPlanId: replacementPlanID
             )
             return ResolvedWorkoutDayPlan(plan: reusedPlan, isPersisted: persistIfNeeded, isReusedBlock: true)
         }
@@ -461,7 +468,8 @@ final class TodayViewModel: ObservableObject {
             template: template,
             drafts: build.exercises,
             persistIfNeeded: persistIfNeeded,
-            shuffleCount: 0
+            shuffleCount: 0,
+            existingPlanId: replacementPlanID
         )
 
         return ResolvedWorkoutDayPlan(plan: plan, isPersisted: persistIfNeeded, isReusedBlock: false)
@@ -472,14 +480,16 @@ final class TodayViewModel: ObservableObject {
         template: WorkoutTemplate,
         drafts: [WorkoutPlanExerciseDraft],
         persistIfNeeded: Bool,
-        shuffleCount: Int
+        shuffleCount: Int,
+        existingPlanId: UUID? = nil
     ) throws -> WorkoutDayPlanWithExercises {
         if persistIfNeeded {
             return try db.saveWorkoutDayPlan(
                 date: date,
                 template: template,
                 exercises: drafts,
-                shuffleCount: shuffleCount
+                shuffleCount: shuffleCount,
+                existingPlanId: existingPlanId
             )
         }
 

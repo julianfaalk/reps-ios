@@ -101,6 +101,25 @@ final class WorkoutPlannerTests: XCTestCase {
         }
     }
 
+    func testBuiltInLegPlanValidationRejectsPullExercises() throws {
+        let template = try template(named: "Legs (Beine, unterer Rücken)")
+        let invalidExercises = try namedExercises([
+            "Kniebeugen",
+            "Pull-Ups",
+            "Chest-Supported Row",
+            "Walking Lunges",
+            "Beinbeuger Maschine",
+            "Wadenheben stehend",
+        ])
+
+        XCTAssertFalse(
+            generator.supportsSavedPlan(
+                template: template,
+                exercises: invalidExercises
+            )
+        )
+    }
+
     func testCustomGeneratorPreservesFirstTwoCompoundAnchorsAndKeepsCompatibility() throws {
         let exercises = try namedExercises([
             "Bankdrücken",
@@ -181,6 +200,63 @@ final class WorkoutPlannerTests: XCTestCase {
 
         XCTAssertEqual(updatedPlan.plan.id, savedPlan.plan.id)
         XCTAssertEqual(try db.fetchTemplateExercises(templateId: template.id).map(\.exercise.id), templateExerciseIDs)
+    }
+
+    @MainActor
+    func testTodayViewModelRebuildsInvalidPersistedLegPlan() async throws {
+        let template = try template(named: "Legs (Beine, unterer Rücken)")
+        let scheduleDay = try scheduledDay(for: template.id)
+        let referenceDate = nextDate(
+            after: makeDate(year: 2026, month: 3, day: 17, hour: 9),
+            matchingScheduleDay: scheduleDay.dayOfWeek
+        )
+        let invalidExercises = try namedExercises([
+            "Kniebeugen",
+            "Pull-Ups",
+            "Chest-Supported Row",
+            "Walking Lunges",
+            "Beinbeuger Maschine",
+            "Wadenheben stehend",
+        ])
+
+        let invalidPlan = try db.saveWorkoutDayPlan(
+            date: referenceDate,
+            template: template,
+            exercises: invalidExercises.enumerated().map { index, exercise in
+                WorkoutPlanExerciseDraft(
+                    exercise: exercise,
+                    sortOrder: index,
+                    targetSets: index == 0 ? 4 : 3,
+                    targetReps: index == 0 ? 6 : 10,
+                    targetDuration: nil,
+                    targetWeight: nil,
+                    isAnchor: index == 0
+                )
+            },
+            shuffleCount: 0
+        )
+
+        XCTAssertTrue(invalidPlan.exercises.contains(where: { $0.exercise.splitTags.contains("pull") }))
+
+        let viewModel = TodayViewModel(db: db, referenceDate: referenceDate)
+        await viewModel.refresh()
+
+        let healedPlan = try XCTUnwrap(viewModel.todayPlan)
+        XCTAssertTrue(
+            generator.supportsSavedPlan(
+                template: template,
+                exercises: healedPlan.exercises.map(\.exercise)
+            )
+        )
+        XCTAssertFalse(healedPlan.exercises.contains(where: { $0.exercise.splitTags.contains("pull") }))
+
+        let persistedPlan = try XCTUnwrap(db.fetchWorkoutDayPlan(date: referenceDate, templateId: template.id))
+        XCTAssertTrue(
+            generator.supportsSavedPlan(
+                template: template,
+                exercises: persistedPlan.exercises.map(\.exercise)
+            )
+        )
     }
 
     @MainActor

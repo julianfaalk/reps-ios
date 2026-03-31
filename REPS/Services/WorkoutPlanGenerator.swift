@@ -69,6 +69,29 @@ struct WorkoutPlanGenerator {
             .joined(separator: "|")
     }
 
+    func supportsSavedPlan(template: WorkoutTemplate, exercises: [Exercise]) -> Bool {
+        guard let category = templateCategory(for: template) else {
+            return true
+        }
+
+        let slots = category.slotSpecs
+        guard exercises.count == slots.count else {
+            return false
+        }
+
+        var seenExerciseIDs = Set<UUID>()
+        for (slot, exercise) in zip(slots, exercises) {
+            guard seenExerciseIDs.insert(exercise.id).inserted else {
+                return false
+            }
+            guard matches(slot: slot, exercise: exercise) else {
+                return false
+            }
+        }
+
+        return true
+    }
+
     private func buildBuiltInPlan(
         category: BuiltInTemplateCategory,
         allExercises: [Exercise],
@@ -391,11 +414,11 @@ struct WorkoutPlanGenerator {
         if name.contains("push") || name.contains("brust") {
             return .push
         }
-        if name.contains("pull") || name.contains("rücken") {
-            return .pull
-        }
         if name.contains("legs") || name.contains("bein") {
             return .legs
+        }
+        if name.contains("pull") || name.contains("rücken") {
+            return .pull
         }
         if name.contains("shoulder") || name.contains("schulter") {
             return .shouldersCore
