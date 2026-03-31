@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @StateObject private var viewModel = SettingsViewModel()
@@ -8,6 +9,7 @@ struct SettingsView: View {
     @State private var showingExportOptions = false
     @State private var showingShareSheet = false
     @State private var exportURLs: [URL] = []
+    @State private var showingImportPicker = false
     @State private var showingResetAlert = false
     @State private var showingSuccessAlert = false
     @State private var showingPaywall = false
@@ -19,6 +21,15 @@ struct SettingsView: View {
 
     private var appBuild: String {
         Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
+    }
+
+    private var importBackupTitle: String {
+        switch localization.selectedLanguage {
+        case .german:
+            return "Backup importieren"
+        default:
+            return "Import Backup"
+        }
     }
 
     var body: some View {
@@ -272,6 +283,12 @@ struct SettingsView: View {
 
                 Section(localization.localized("profile.data.section")) {
                     Button {
+                        showingImportPicker = true
+                    } label: {
+                        Label(importBackupTitle, systemImage: "square.and.arrow.down")
+                    }
+
+                    Button {
                         if storeManager.isPremium {
                             showingExportOptions = true
                         } else {
@@ -356,6 +373,18 @@ struct SettingsView: View {
                 }
 
                 Button(localization.localized("common.cancel"), role: .cancel) { }
+            }
+            .fileImporter(isPresented: $showingImportPicker, allowedContentTypes: [.json]) { result in
+                switch result {
+                case .success(let url):
+                    Task {
+                        if await viewModel.importBackup(from: url) {
+                            showingSuccessAlert = true
+                        }
+                    }
+                case .failure(let error):
+                    viewModel.errorMessage = error.localizedDescription
+                }
             }
             .sheet(isPresented: $showingShareSheet) {
                 ShareSheet(items: exportURLs)

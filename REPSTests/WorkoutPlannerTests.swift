@@ -322,6 +322,267 @@ final class WorkoutPlannerTests: XCTestCase {
         )
     }
 
+    func testExportJSONRoundTripRestoresCompleteBackup() throws {
+        let customExercise = Exercise(
+            name: "Machine Row Neutral Grip",
+            exerciseType: .reps,
+            muscleGroups: ["Back"],
+            equipment: "Machine",
+            notes: "Custom migration test exercise"
+        )
+        try db.saveExercise(customExercise)
+
+        let customTemplate = WorkoutTemplate(name: "Custom Pull Day")
+        try db.saveTemplate(customTemplate)
+        try db.saveTemplateExercise(
+            TemplateExercise(
+                templateId: customTemplate.id,
+                exerciseId: customExercise.id,
+                sortOrder: 0,
+                targetSets: 4,
+                targetReps: 8,
+                targetWeight: 72.5
+            )
+        )
+
+        let planDate = makeDate(year: 2026, month: 3, day: 25, hour: 18)
+        let savedPlan = try db.saveWorkoutDayPlan(
+            date: planDate,
+            template: customTemplate,
+            exercises: [
+                WorkoutPlanExerciseDraft(
+                    exercise: customExercise,
+                    sortOrder: 0,
+                    targetSets: 4,
+                    targetReps: 8,
+                    targetDuration: nil,
+                    targetWeight: 72.5,
+                    isAnchor: true
+                )
+            ],
+            shuffleCount: 0
+        )
+
+        let sessionStart = planDate.addingTimeInterval(300)
+        let session = WorkoutSession(
+            templateId: customTemplate.id,
+            dayPlanId: savedPlan.plan.id,
+            startedAt: sessionStart,
+            completedAt: sessionStart.addingTimeInterval(3000),
+            duration: 3000,
+            notes: "Migration roundtrip session"
+        )
+        try db.saveSession(session)
+        try db.saveSessionSet(
+            SessionSet(
+                sessionId: session.id,
+                exerciseId: customExercise.id,
+                setNumber: 1,
+                reps: 8,
+                weight: 72.5,
+                completedAt: sessionStart.addingTimeInterval(600)
+            )
+        )
+        try db.saveCardioSession(
+            CardioSession(
+                sessionId: session.id,
+                cardioType: .bike,
+                duration: 600,
+                calories: 110,
+                notes: "Warmup"
+            )
+        )
+
+        let measurement = Measurement(
+            date: makeDate(year: 2026, month: 3, day: 24, hour: 8),
+            bodyWeight: 82.4,
+            bodyFat: 14.1,
+            notes: "Check-in"
+        )
+        try db.saveMeasurement(measurement)
+        try db.saveProgressPhoto(
+            ProgressPhoto(
+                measurementId: measurement.id,
+                photoData: Data([0x01, 0x02, 0x03]),
+                photoType: .front,
+                createdAt: measurement.createdAt
+            )
+        )
+        try db.savePersonalRecord(
+            PersonalRecord(
+                exerciseId: customExercise.id,
+                weight: 72.5,
+                reps: 8,
+                achievedAt: sessionStart.addingTimeInterval(600),
+                sessionId: session.id
+            )
+        )
+
+        var settings = try db.fetchSettings()
+        settings.weekStartsOn = 0
+        settings.trainingSetupCompleted = true
+        settings.preferredLanguage = AppLanguage.german.rawValue
+        try db.saveSettings(settings)
+
+        let backupData = try db.exportToJSON()
+
+        let restoredDB = DatabaseService(inMemory: true)
+        let summary = try restoredDB.importFromJSON(backupData)
+
+        XCTAssertEqual(summary.source, "reps_backup")
+        XCTAssertEqual(summary.workoutSessions, 1)
+        XCTAssertEqual(summary.measurements, 1)
+        XCTAssertEqual(try restoredDB.fetchAllSessions().count, 1)
+        XCTAssertEqual(try restoredDB.fetchAllMeasurements().count, 1)
+        XCTAssertEqual(try restoredDB.fetchAllPersonalRecords().count, 1)
+        XCTAssertEqual(try restoredDB.fetchTemplateExercises(templateId: customTemplate.id).count, 1)
+        XCTAssertEqual(try restoredDB.read(CardioSession.all()).count, 1)
+        XCTAssertEqual(try restoredDB.fetchWorkoutDayPlan(id: savedPlan.plan.id)?.exercises.first?.exercise.id, customExercise.id)
+        XCTAssertEqual(try restoredDB.fetchMeasurementWithPhotos(id: measurement.id)?.photos.count, 1)
+        XCTAssertEqual(try restoredDB.fetchSession(id: session.id)?.dayPlanId, savedPlan.plan.id)
+
+        let restoredSettings = try restoredDB.fetchSettings()
+        XCTAssertEqual(restoredSettings.weekStartsOn, 0)
+        XCTAssertEqual(restoredSettings.preferredLanguage, AppLanguage.german.rawValue)
+    }
+
+    func testLegacyExportImportMapsKnownExercisesToCurrentCatalog() throws {
+        let now = makeDate(year: 2026, month: 3, day: 26, hour: 10)
+        let knownExerciseID = UUID()
+        let customExerciseID = UUID()
+        let knownTemplateID = UUID()
+        let customTemplateID = UUID()
+        let firstSessionID = UUID()
+        let secondSessionID = UUID()
+        let firstSetID = UUID()
+        let secondSetID = UUID()
+        let measurementID = UUID()
+        let recordID = UUID()
+
+        let legacyJSON = """
+        {
+          "exercises": [
+            {
+              "id": "\(knownExerciseID.uuidString)",
+              "name": "Bankdrücken",
+              "exerciseType": "reps",
+              "muscleGroups": ["Chest", "Triceps"],
+              "equipment": "Barbell",
+              "notes": "Legacy known exercise",
+              "createdAt": "\(isoString(now))",
+              "updatedAt": "\(isoString(now))"
+            },
+            {
+              "id": "\(customExerciseID.uuidString)",
+              "name": "Seal Row",
+              "exerciseType": "reps",
+              "muscleGroups": ["Back"],
+              "equipment": "Machine",
+              "notes": "Legacy custom exercise",
+              "createdAt": "\(isoString(now))",
+              "updatedAt": "\(isoString(now))"
+            }
+          ],
+          "templates": [
+            {
+              "id": "\(knownTemplateID.uuidString)",
+              "name": "Push (Brust, Trizeps, vordere Schulter)",
+              "createdAt": "\(isoString(now))",
+              "updatedAt": "\(isoString(now))"
+            },
+            {
+              "id": "\(customTemplateID.uuidString)",
+              "name": "Custom Volume Day",
+              "createdAt": "\(isoString(now))",
+              "updatedAt": "\(isoString(now))"
+            }
+          ],
+          "workoutSessions": [
+            {
+              "id": "\(firstSessionID.uuidString)",
+              "templateId": "\(knownTemplateID.uuidString)",
+              "startedAt": "\(isoString(now))",
+              "completedAt": "\(isoString(now.addingTimeInterval(1800)))",
+              "duration": 1800,
+              "notes": "Legacy push workout"
+            },
+            {
+              "id": "\(secondSessionID.uuidString)",
+              "templateId": "\(customTemplateID.uuidString)",
+              "startedAt": "\(isoString(now.addingTimeInterval(3600)))",
+              "completedAt": "\(isoString(now.addingTimeInterval(5400)))",
+              "duration": 1800,
+              "notes": "Legacy custom workout"
+            }
+          ],
+          "sessionSets": [
+            {
+              "id": "\(firstSetID.uuidString)",
+              "sessionId": "\(firstSessionID.uuidString)",
+              "exerciseId": "\(knownExerciseID.uuidString)",
+              "setNumber": 1,
+              "reps": 8,
+              "duration": null,
+              "weight": 80,
+              "completedAt": "\(isoString(now.addingTimeInterval(600)))"
+            },
+            {
+              "id": "\(secondSetID.uuidString)",
+              "sessionId": "\(secondSessionID.uuidString)",
+              "exerciseId": "\(customExerciseID.uuidString)",
+              "setNumber": 1,
+              "reps": 10,
+              "duration": null,
+              "weight": 55,
+              "completedAt": "\(isoString(now.addingTimeInterval(4200)))"
+            }
+          ],
+          "measurements": [
+            {
+              "id": "\(measurementID.uuidString)",
+              "date": "\(isoString(now))",
+              "bodyWeight": 81.2,
+              "bodyFat": 13.4,
+              "notes": "Legacy measurement",
+              "createdAt": "\(isoString(now))"
+            }
+          ],
+          "personalRecords": [
+            {
+              "id": "\(recordID.uuidString)",
+              "exerciseId": "\(customExerciseID.uuidString)",
+              "weight": 55,
+              "reps": 10,
+              "achievedAt": "\(isoString(now.addingTimeInterval(4200)))",
+              "sessionId": "\(secondSessionID.uuidString)"
+            }
+          ]
+        }
+        """
+
+        let restoredDB = DatabaseService(inMemory: true)
+        let summary = try restoredDB.importFromJSON(Data(legacyJSON.utf8))
+
+        XCTAssertEqual(summary.source, "legacy_export")
+        XCTAssertEqual(summary.workoutSessions, 2)
+        XCTAssertEqual(summary.measurements, 1)
+
+        let allExercises = try restoredDB.fetchAllExercises()
+        let knownExercise = try XCTUnwrap(allExercises.first(where: { $0.name == "Bankdrücken" }))
+        let customExercise = try XCTUnwrap(allExercises.first(where: { $0.name == "Seal Row" }))
+
+        XCTAssertNotEqual(knownExercise.id, knownExerciseID)
+        XCTAssertEqual(customExercise.id, customExerciseID)
+
+        let knownSessionSets = try restoredDB.fetchSessionSets(sessionId: firstSessionID)
+        XCTAssertEqual(knownSessionSets.first?.exercise.id, knownExercise.id)
+
+        let customSession = try restoredDB.fetchSessionWithDetails(id: secondSessionID)
+        XCTAssertEqual(customSession?.template?.name, "Custom Volume Day")
+        XCTAssertEqual(customSession?.sets.first?.exercise.id, customExerciseID)
+        XCTAssertEqual(try restoredDB.fetchAllPersonalRecords().first?.exercise.id, customExerciseID)
+    }
+
     private func template(named name: String) throws -> WorkoutTemplate {
         guard let template = try db.fetchAllTemplates().first(where: { $0.name == name }) else {
             throw XCTSkip("Missing seeded template \(name)")
@@ -367,5 +628,11 @@ final class WorkoutPlannerTests: XCTestCase {
         }
 
         return cursor
+    }
+
+    private func isoString(_ date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: date)
     }
 }

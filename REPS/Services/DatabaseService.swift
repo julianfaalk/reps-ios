@@ -4,6 +4,148 @@ import GRDB
 final class DatabaseService {
     static let shared = DatabaseService()
 
+    struct ImportSummary {
+        let source: String
+        let exercises: Int
+        let templates: Int
+        let workoutSessions: Int
+        let sessionSets: Int
+        let measurements: Int
+        let personalRecords: Int
+    }
+
+    private struct BackupDocument: Codable {
+        let app: String
+        let formatVersion: Int
+        let exportedAt: Date
+        let exercises: [Exercise]
+        let templates: [WorkoutTemplate]
+        let templateExercises: [TemplateExercise]
+        let schedule: [Schedule]
+        let workoutSessions: [WorkoutSession]
+        let sessionSets: [SessionSet]
+        let cardioSessions: [CardioSession]
+        let measurements: [Measurement]
+        let progressPhotos: [ProgressPhoto]
+        let personalRecords: [PersonalRecord]
+        let settings: [SettingEntry]
+        let workoutDayPlans: [WorkoutDayPlan]
+        let workoutDayPlanExercises: [WorkoutDayPlanExercise]
+    }
+
+    private struct LegacyExport: Codable {
+        let exercises: [LegacyExercise]
+        let templates: [LegacyTemplate]
+        let workoutSessions: [LegacyWorkoutSession]
+        let sessionSets: [LegacySessionSet]
+        let measurements: [LegacyMeasurement]
+        let personalRecords: [LegacyPersonalRecord]
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            exercises = try container.decodeIfPresent([LegacyExercise].self, forKey: .exercises) ?? []
+            templates = try container.decodeIfPresent([LegacyTemplate].self, forKey: .templates) ?? []
+            workoutSessions = try container.decodeIfPresent([LegacyWorkoutSession].self, forKey: .workoutSessions) ?? []
+            sessionSets = try container.decodeIfPresent([LegacySessionSet].self, forKey: .sessionSets) ?? []
+            measurements = try container.decodeIfPresent([LegacyMeasurement].self, forKey: .measurements) ?? []
+            personalRecords = try container.decodeIfPresent([LegacyPersonalRecord].self, forKey: .personalRecords) ?? []
+        }
+    }
+
+    private struct LegacyExercise: Codable {
+        let id: UUID
+        let name: String
+        let exerciseType: String?
+        let muscleGroups: [String]
+        let equipment: String?
+        let notes: String?
+        let createdAt: Date
+        let updatedAt: Date
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            id = try container.decode(UUID.self, forKey: .id)
+            name = try container.decode(String.self, forKey: .name)
+            exerciseType = try container.decodeIfPresent(String.self, forKey: .exerciseType)
+            muscleGroups = try container.decodeIfPresent([String].self, forKey: .muscleGroups) ?? []
+            equipment = try container.decodeIfPresent(String.self, forKey: .equipment)
+            notes = try container.decodeIfPresent(String.self, forKey: .notes)
+            createdAt = try container.decode(Date.self, forKey: .createdAt)
+            updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+        }
+    }
+
+    private struct LegacyTemplate: Codable {
+        let id: UUID
+        let name: String
+        let createdAt: Date
+        let updatedAt: Date
+    }
+
+    private struct LegacyWorkoutSession: Codable {
+        let id: UUID
+        let templateId: UUID?
+        let startedAt: Date
+        let completedAt: Date?
+        let duration: Int?
+        let notes: String?
+    }
+
+    private struct LegacySessionSet: Codable {
+        let id: UUID
+        let sessionId: UUID
+        let exerciseId: UUID
+        let setNumber: Int
+        let reps: Int?
+        let duration: Int?
+        let weight: Double?
+        let completedAt: Date
+    }
+
+    private struct LegacyMeasurement: Codable {
+        let id: UUID
+        let date: Date
+        let bodyWeight: Double?
+        let bodyFat: Double?
+        let notes: String?
+        let createdAt: Date
+    }
+
+    private struct LegacyPersonalRecord: Codable {
+        let id: UUID
+        let exerciseId: UUID
+        let weight: Double
+        let reps: Int
+        let achievedAt: Date
+        let sessionId: UUID
+    }
+
+    private static let backupEncoder: JSONEncoder = {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .custom { date, encoder in
+            var container = encoder.singleValueContainer()
+            try container.encode(DatabaseService.encodeDate(date))
+        }
+        return encoder
+    }()
+
+    private static let backupDecoder: JSONDecoder = {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            let string = try container.decode(String.self)
+            guard let date = DatabaseService.decodeDate(string) else {
+                throw DecodingError.dataCorruptedError(
+                    in: container,
+                    debugDescription: "Could not decode date: \(string)"
+                )
+            }
+            return date
+        }
+        return decoder
+    }()
+
     private var dbQueue: DatabaseQueue!
     private let useInMemoryDatabase: Bool
     private let customDatabasePath: String?
@@ -434,6 +576,10 @@ final class DatabaseService {
                 sql: "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
                 arguments: [AppSettings.personalPlanLockedKey, "false"]
             )
+        }
+
+        migrator.registerMigration("v6_refresh_exercise_catalog") { db in
+            try Self.applyExerciseCatalogMetadataAndInsertions(db: db, now: Date())
         }
 
         return migrator
@@ -1444,84 +1590,109 @@ final class DatabaseService {
 
     func exportToJSON() throws -> Data {
         try dbQueue.read { db in
-            var export: [String: Any] = [:]
-
-            let exercises = try Exercise.fetchAll(db)
-            export["exercises"] = exercises.map { e -> [String: Any] in
-                [
-                    "id": e.id.uuidString,
-                    "name": e.name,
-                    "exerciseType": e.exerciseType.rawValue,
-                    "muscleGroups": e.muscleGroups,
-                    "equipment": e.equipment as Any,
-                    "notes": e.notes as Any,
-                    "createdAt": ISO8601DateFormatter().string(from: e.createdAt),
-                    "updatedAt": ISO8601DateFormatter().string(from: e.updatedAt)
-                ]
-            }
-
-            let templates = try WorkoutTemplate.fetchAll(db)
-            export["templates"] = templates.map { t -> [String: Any] in
-                [
-                    "id": t.id.uuidString,
-                    "name": t.name,
-                    "createdAt": ISO8601DateFormatter().string(from: t.createdAt),
-                    "updatedAt": ISO8601DateFormatter().string(from: t.updatedAt)
-                ]
-            }
-
-            let sessions = try WorkoutSession.fetchAll(db)
-            export["workoutSessions"] = sessions.map { s -> [String: Any] in
-                [
-                    "id": s.id.uuidString,
-                    "templateId": s.templateId?.uuidString as Any,
-                    "startedAt": ISO8601DateFormatter().string(from: s.startedAt),
-                    "completedAt": s.completedAt.map { ISO8601DateFormatter().string(from: $0) } as Any,
-                    "duration": s.duration as Any,
-                    "notes": s.notes as Any
-                ]
-            }
-
-            let sets = try SessionSet.fetchAll(db)
-            export["sessionSets"] = sets.map { s -> [String: Any] in
-                [
-                    "id": s.id.uuidString,
-                    "sessionId": s.sessionId.uuidString,
-                    "exerciseId": s.exerciseId.uuidString,
-                    "setNumber": s.setNumber,
-                    "reps": s.reps as Any,
-                    "duration": s.duration as Any,
-                    "weight": s.weight as Any,
-                    "completedAt": ISO8601DateFormatter().string(from: s.completedAt)
-                ]
-            }
-
-            let measurements = try Measurement.fetchAll(db)
-            export["measurements"] = measurements.map { m -> [String: Any] in
-                [
-                    "id": m.id.uuidString,
-                    "date": ISO8601DateFormatter().string(from: m.date),
-                    "bodyWeight": m.bodyWeight as Any,
-                    "bodyFat": m.bodyFat as Any,
-                    "notes": m.notes as Any,
-                    "createdAt": ISO8601DateFormatter().string(from: m.createdAt)
-                ]
-            }
-
-            let records = try PersonalRecord.fetchAll(db)
-            export["personalRecords"] = records.map { r -> [String: Any] in
-                [
-                    "id": r.id.uuidString,
-                    "exerciseId": r.exerciseId.uuidString,
-                    "weight": r.weight,
-                    "reps": r.reps,
-                    "achievedAt": ISO8601DateFormatter().string(from: r.achievedAt),
-                    "sessionId": r.sessionId.uuidString
-                ]
-            }
-
-            return try JSONSerialization.data(withJSONObject: export, options: .prettyPrinted)
+            let backup = BackupDocument(
+                app: "REPS",
+                formatVersion: 1,
+                exportedAt: Date(),
+                exercises: try Exercise.fetchAll(db),
+                templates: try WorkoutTemplate.fetchAll(db),
+                templateExercises: try TemplateExercise.fetchAll(db),
+                schedule: try Schedule.fetchAll(db),
+                workoutSessions: try WorkoutSession.fetchAll(db),
+                sessionSets: try SessionSet.fetchAll(db),
+                cardioSessions: try CardioSession.fetchAll(db),
+                measurements: try Measurement.fetchAll(db),
+                progressPhotos: try ProgressPhoto.fetchAll(db),
+                personalRecords: try PersonalRecord.fetchAll(db),
+                settings: try SettingEntry.fetchAll(db),
+                workoutDayPlans: try WorkoutDayPlan.fetchAll(db),
+                workoutDayPlanExercises: try WorkoutDayPlanExercise.fetchAll(db)
+            )
+            return try Self.backupEncoder.encode(backup)
         }
+    }
+
+    func importFromJSON(_ data: Data) throws -> ImportSummary {
+        if let backup = try? Self.backupDecoder.decode(BackupDocument.self, from: data) {
+            guard backup.app == "REPS" else {
+                throw NSError(
+                    domain: "DatabaseService",
+                    code: 400,
+                    userInfo: [NSLocalizedDescriptionKey: "This backup file is not a REPS backup."]
+                )
+            }
+            guard backup.formatVersion == 1 else {
+                throw NSError(
+                    domain: "DatabaseService",
+                    code: 400,
+                    userInfo: [NSLocalizedDescriptionKey: "Unsupported REPS backup format version \(backup.formatVersion)."]
+                )
+            }
+
+            return try dbQueue.write { db in
+                try self.clearAllData(db: db)
+
+                for exercise in backup.exercises {
+                    try exercise.insert(db)
+                }
+                for template in backup.templates {
+                    try template.insert(db)
+                }
+                for templateExercise in backup.templateExercises {
+                    try templateExercise.insert(db)
+                }
+                for schedule in backup.schedule {
+                    try schedule.insert(db)
+                }
+                for dayPlan in backup.workoutDayPlans {
+                    try dayPlan.insert(db)
+                }
+                for dayPlanExercise in backup.workoutDayPlanExercises {
+                    try dayPlanExercise.insert(db)
+                }
+                for session in backup.workoutSessions {
+                    try session.insert(db)
+                }
+                for set in backup.sessionSets {
+                    try set.insert(db)
+                }
+                for cardioSession in backup.cardioSessions {
+                    try cardioSession.insert(db)
+                }
+                for measurement in backup.measurements {
+                    try measurement.insert(db)
+                }
+                for progressPhoto in backup.progressPhotos {
+                    try progressPhoto.insert(db)
+                }
+                for personalRecord in backup.personalRecords {
+                    try personalRecord.insert(db)
+                }
+                for setting in backup.settings {
+                    try setting.save(db)
+                }
+
+                return ImportSummary(
+                    source: "reps_backup",
+                    exercises: backup.exercises.count,
+                    templates: backup.templates.count,
+                    workoutSessions: backup.workoutSessions.count,
+                    sessionSets: backup.sessionSets.count,
+                    measurements: backup.measurements.count,
+                    personalRecords: backup.personalRecords.count
+                )
+            }
+        }
+
+        if let legacy = try? Self.backupDecoder.decode(LegacyExport.self, from: data) {
+            return try importLegacyExport(legacy)
+        }
+
+        throw NSError(
+            domain: "DatabaseService",
+            code: 400,
+            userInfo: [NSLocalizedDescriptionKey: "The selected file is not a supported REPS or legacy workout export."]
+        )
     }
 
     func exportToCSV() throws -> [String: String] {
@@ -1687,6 +1858,186 @@ final class DatabaseService {
                 try entry.makeExercise(now: now).insert(db)
             }
         }
+    }
+
+    private func importLegacyExport(_ legacy: LegacyExport) throws -> ImportSummary {
+        try resetAndReseedDatabase()
+
+        return try dbQueue.write { db in
+            var exerciseNameMap: [String: Exercise] = Dictionary(
+                uniqueKeysWithValues: try Exercise.fetchAll(db).map { (Self.normalizeName($0.name), $0) }
+            )
+            var templateNameMap: [String: WorkoutTemplate] = Dictionary(
+                uniqueKeysWithValues: try WorkoutTemplate.fetchAll(db).map { (Self.normalizeName($0.name), $0) }
+            )
+
+            var exerciseIDMap: [UUID: UUID] = [:]
+            for legacyExercise in legacy.exercises {
+                let normalizedName = Self.normalizeName(legacyExercise.name)
+                if let existing = exerciseNameMap[normalizedName] {
+                    exerciseIDMap[legacyExercise.id] = existing.id
+                    continue
+                }
+
+                let exercise = Exercise(
+                    id: legacyExercise.id,
+                    name: legacyExercise.name,
+                    exerciseType: ExerciseType(rawValue: legacyExercise.exerciseType ?? "") ?? .reps,
+                    muscleGroups: legacyExercise.muscleGroups,
+                    equipment: legacyExercise.equipment,
+                    notes: legacyExercise.notes,
+                    createdAt: legacyExercise.createdAt,
+                    updatedAt: legacyExercise.updatedAt
+                )
+                try exercise.insert(db)
+                exerciseNameMap[normalizedName] = exercise
+                exerciseIDMap[legacyExercise.id] = exercise.id
+            }
+
+            var templateIDMap: [UUID: UUID] = [:]
+            for legacyTemplate in legacy.templates {
+                let normalizedName = Self.normalizeName(legacyTemplate.name)
+                if let existing = templateNameMap[normalizedName] {
+                    templateIDMap[legacyTemplate.id] = existing.id
+                    continue
+                }
+
+                let template = WorkoutTemplate(
+                    id: legacyTemplate.id,
+                    name: legacyTemplate.name,
+                    createdAt: legacyTemplate.createdAt,
+                    updatedAt: legacyTemplate.updatedAt
+                )
+                try template.insert(db)
+                templateNameMap[normalizedName] = template
+                templateIDMap[legacyTemplate.id] = template.id
+            }
+
+            for legacySession in legacy.workoutSessions {
+                let session = WorkoutSession(
+                    id: legacySession.id,
+                    templateId: legacySession.templateId.flatMap { templateIDMap[$0] },
+                    startedAt: legacySession.startedAt,
+                    completedAt: legacySession.completedAt,
+                    duration: legacySession.duration,
+                    notes: legacySession.notes
+                )
+                try session.insert(db)
+            }
+
+            for legacySet in legacy.sessionSets {
+                guard let mappedExerciseID = exerciseIDMap[legacySet.exerciseId] else {
+                    throw NSError(
+                        domain: "DatabaseService",
+                        code: 400,
+                        userInfo: [NSLocalizedDescriptionKey: "Legacy export references an unknown exercise."]
+                    )
+                }
+
+                let set = SessionSet(
+                    id: legacySet.id,
+                    sessionId: legacySet.sessionId,
+                    exerciseId: mappedExerciseID,
+                    setNumber: legacySet.setNumber,
+                    reps: legacySet.reps,
+                    duration: legacySet.duration,
+                    weight: legacySet.weight,
+                    completedAt: legacySet.completedAt
+                )
+                try set.insert(db)
+            }
+
+            for legacyMeasurement in legacy.measurements {
+                let measurement = Measurement(
+                    id: legacyMeasurement.id,
+                    date: legacyMeasurement.date,
+                    bodyWeight: legacyMeasurement.bodyWeight,
+                    bodyFat: legacyMeasurement.bodyFat,
+                    notes: legacyMeasurement.notes,
+                    createdAt: legacyMeasurement.createdAt
+                )
+                try measurement.insert(db)
+            }
+
+            for legacyRecord in legacy.personalRecords {
+                guard let mappedExerciseID = exerciseIDMap[legacyRecord.exerciseId] else {
+                    throw NSError(
+                        domain: "DatabaseService",
+                        code: 400,
+                        userInfo: [NSLocalizedDescriptionKey: "Legacy export references an unknown personal record exercise."]
+                    )
+                }
+
+                guard try WorkoutSession.fetchOne(db, key: legacyRecord.sessionId) != nil else {
+                    throw NSError(
+                        domain: "DatabaseService",
+                        code: 400,
+                        userInfo: [NSLocalizedDescriptionKey: "Legacy export references a missing workout session."]
+                    )
+                }
+
+                let record = PersonalRecord(
+                    id: legacyRecord.id,
+                    exerciseId: mappedExerciseID,
+                    weight: legacyRecord.weight,
+                    reps: legacyRecord.reps,
+                    achievedAt: legacyRecord.achievedAt,
+                    sessionId: legacyRecord.sessionId
+                )
+                try record.insert(db)
+            }
+
+            return ImportSummary(
+                source: "legacy_export",
+                exercises: try Exercise.fetchCount(db),
+                templates: try WorkoutTemplate.fetchCount(db),
+                workoutSessions: legacy.workoutSessions.count,
+                sessionSets: legacy.sessionSets.count,
+                measurements: legacy.measurements.count,
+                personalRecords: legacy.personalRecords.count
+            )
+        }
+    }
+
+    private func clearAllData(db: Database) throws {
+        try db.execute(sql: "DELETE FROM progress_photos")
+        try db.execute(sql: "DELETE FROM personal_records")
+        try db.execute(sql: "DELETE FROM cardio_sessions")
+        try db.execute(sql: "DELETE FROM session_sets")
+        try db.execute(sql: "DELETE FROM workout_sessions")
+        try db.execute(sql: "DELETE FROM workout_day_plan_exercises")
+        try db.execute(sql: "DELETE FROM workout_day_plans")
+        try db.execute(sql: "DELETE FROM schedule")
+        try db.execute(sql: "DELETE FROM template_exercises")
+        try db.execute(sql: "DELETE FROM templates")
+        try db.execute(sql: "DELETE FROM exercises")
+        try db.execute(sql: "DELETE FROM measurements")
+        try db.execute(sql: "DELETE FROM settings")
+    }
+
+    private static func normalizeName(_ value: String) -> String {
+        value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            .lowercased()
+    }
+
+    private static func encodeDate(_ date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: date)
+    }
+
+    private static func decodeDate(_ string: String) -> Date? {
+        let formatterWithFractions = ISO8601DateFormatter()
+        formatterWithFractions.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatterWithFractions.date(from: string) {
+            return date
+        }
+
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.date(from: string)
     }
 
     private static func exerciseCatalogEntries() -> [ExerciseCatalogEntry] {

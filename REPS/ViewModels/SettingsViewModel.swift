@@ -139,7 +139,7 @@ class SettingsViewModel: ObservableObject {
     func exportJSON() -> URL? {
         do {
             let data = try db.exportToJSON()
-            let fileName = "workout_export_\(Date().ISO8601Format()).json"
+            let fileName = "reps_backup_\(Date().ISO8601Format()).json"
             let url = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
             try data.write(to: url)
             exportMessage = localization.localized("profile.export.success")
@@ -166,6 +166,38 @@ class SettingsViewModel: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
             return []
+        }
+    }
+
+    func importBackup(from url: URL) async -> Bool {
+        isLoading = true
+        defer { isLoading = false }
+
+        let accessedSecurityScopedResource = url.startAccessingSecurityScopedResource()
+        defer {
+            if accessedSecurityScopedResource {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        do {
+            let data = try Data(contentsOf: url)
+            let summary = try db.importFromJSON(data)
+            exportMessage = importSuccessMessage(for: summary)
+            errorMessage = nil
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    private func importSuccessMessage(for summary: DatabaseService.ImportSummary) -> String {
+        switch localization.selectedLanguage {
+        case .german:
+            return "Import abgeschlossen: \(summary.workoutSessions) Workouts, \(summary.measurements) Messungen und \(summary.exercises) Übungen."
+        default:
+            return "Import finished: \(summary.workoutSessions) workouts, \(summary.measurements) measurements, and \(summary.exercises) exercises."
         }
     }
 }
